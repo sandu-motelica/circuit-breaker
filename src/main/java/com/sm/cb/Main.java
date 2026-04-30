@@ -12,6 +12,7 @@ public class Main {
         CircuitBreakerConfig config = new CircuitBreakerConfig(
                 0.5f,
                 5,
+                4,
                 SlidingWindowType.COUNT_BASED,
                 Duration.ofSeconds(3),
                 2
@@ -22,7 +23,7 @@ public class Main {
         Random random = new Random();
 
         for (int i = 1; i <= 30; i++) {
-            System.out.println("\nCall #" + i + " | State: " + cb.getState());
+            System.out.println("\n--- Call #" + i + " ---");
 
             try {
                 String result = cb.execute(() -> {
@@ -39,6 +40,7 @@ public class Main {
             }
 
             System.out.println("Failure rate: " + cb.getFailureRate());
+            System.out.println("Resulting State: " + cb.getState());
 
             Thread.sleep(500);
         }

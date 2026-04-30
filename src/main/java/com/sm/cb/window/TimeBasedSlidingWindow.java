@@ -69,6 +69,20 @@ public class TimeBasedSlidingWindow implements SlidingWindow {
         }
     }
 
+    @Override
+    public int getTotalCalls() {
+        long nowSecond = currentSecond();
+        int total = 0;
+
+        for (int i = 0; i < windowSizeInSeconds; i++) {
+            SecondBucket bucket = buckets[i];
+            if (bucket.second >= 0 && bucket.second > nowSecond - windowSizeInSeconds) {
+                total += bucket.totalCalls;
+            }
+        }
+        return total;
+    }
+
     private void record(boolean success) {
         long nowSecond = currentSecond();
 

@@ -8,4 +8,6 @@ public interface SlidingWindow {
     float getFailureRate();
 
     void reset();
+
+    int getTotalCalls();
 }

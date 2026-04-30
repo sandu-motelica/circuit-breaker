@@ -35,6 +35,18 @@ public class CountBasedSlidingWindow implements SlidingWindow {
         return (float) failures / totalCalls;
     }
 
+    @Override
+    public void reset() {
+        this.failures = 0;
+        this.currentIndex = 0;
+        this.totalCalls = 0;
+    }
+
+    @Override
+    public int getTotalCalls() {
+        return totalCalls;
+    }
+
     private void record(boolean success) {
         if (totalCalls == size) {
             boolean oldOutcome = outcomes[currentIndex];
@@ -50,12 +62,5 @@ public class CountBasedSlidingWindow implements SlidingWindow {
             failures++;
         }
         currentIndex = (currentIndex + 1) % size;
-    }
-
-    @Override
-    public void reset() {
-        this.failures = 0;
-        this.currentIndex = 0;
-        this.totalCalls = 0;
     }
 }

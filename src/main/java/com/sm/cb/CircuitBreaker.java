@@ -99,7 +99,7 @@ public class CircuitBreaker {
         if (state == CircuitBreakerState.CLOSED) {
             slidingWindow.recordFailure();
 
-            if (slidingWindow.getFailureRate() >= config.getFailureRateThreshold()) {
+            if (slidingWindow.getTotalCalls() >= config.getMinimumCalls() && slidingWindow.getFailureRate() >= config.getFailureRateThreshold()) {
                 transitionToOpen();
             }
 
