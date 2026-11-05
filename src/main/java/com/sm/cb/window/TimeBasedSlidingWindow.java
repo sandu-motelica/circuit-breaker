@@ -40,17 +40,17 @@ public class TimeBasedSlidingWindow implements SlidingWindow {
     }
 
     @Override
-    public void recordSuccess() {
+    public synchronized void recordSuccess() {
         record(true);
     }
 
     @Override
-    public void recordFailure() {
+    public synchronized void recordFailure() {
         record(false);
     }
 
     @Override
-    public float getFailureRate() {
+    public synchronized float getFailureRate() {
         long nowSecond = currentSecond();
         int totalFailures = 0, totalCalls = 0;
         for (int i = 0; i < windowSizeInSeconds; i++) {
@@ -67,14 +67,14 @@ public class TimeBasedSlidingWindow implements SlidingWindow {
     }
 
     @Override
-    public void reset() {
+    public synchronized void reset() {
         for (int i = 0; i < windowSizeInSeconds; i++) {
             buckets[i].reset();
         }
     }
 
     @Override
-    public int getTotalCalls() {
+    public synchronized int getTotalCalls() {
         long nowSecond = currentSecond();
         int total = 0;
 

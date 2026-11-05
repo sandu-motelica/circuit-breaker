@@ -7,7 +7,7 @@ import java.time.ZoneId;
 import java.util.Objects;
 
 public final class MutableClock extends Clock {
-    private Instant currentInstant;
+    private volatile Instant currentInstant;
     private final ZoneId zone;
 
     public MutableClock(Instant initialInstant) {

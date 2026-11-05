@@ -20,30 +20,30 @@ public class CountBasedSlidingWindow implements SlidingWindow {
     }
 
     @Override
-    public void recordSuccess() {
+    public synchronized void recordSuccess() {
         record(true);
     }
 
     @Override
-    public void recordFailure() {
+    public synchronized void recordFailure() {
         record(false);
     }
 
     @Override
-    public float getFailureRate() {
+    public synchronized float getFailureRate() {
         if (totalCalls == 0) return 0.0f;
         return (float) failures / totalCalls;
     }
 
     @Override
-    public void reset() {
+    public synchronized void reset() {
         this.failures = 0;
         this.currentIndex = 0;
         this.totalCalls = 0;
     }
 
     @Override
-    public int getTotalCalls() {
+    public synchronized int getTotalCalls() {
         return totalCalls;
     }
 

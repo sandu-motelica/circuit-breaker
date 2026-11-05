@@ -14,9 +14,11 @@ import java.util.function.Supplier;
 public class CircuitBreaker {
     private final Clock clock;
     private final CircuitBreakerConfig config;
+    private final Object stateLock = new Object();
     private Instant openStateAt;
 
     private CircuitBreakerState state;
+    private long stateVersion;
     private final SlidingWindow slidingWindow;
     private int halfOpenSuccesses;
     private int halfOpenCalls;
@@ -34,6 +36,7 @@ public class CircuitBreaker {
         }
         this.config = config;
         this.state = CircuitBreakerState.CLOSED;
+        this.stateVersion = 0;
         if (config.getSlidingWindowType() == SlidingWindowType.COUNT_BASED) {
             this.slidingWindow = new CountBasedSlidingWindow(config.getSlidingWindowSize());
         } else {
@@ -48,24 +51,36 @@ public class CircuitBreaker {
         if (supplier == null) {
             throw new IllegalArgumentException("Supplier must not be null");
         }
-        checkCallPermitted();
+        long callStateVersion;
+        synchronized (stateLock) {
+            checkCallPermitted();
+            callStateVersion = stateVersion;
+        }
 
         try {
             T response = supplier.get();
-            onSuccess();
+            synchronized (stateLock) {
+                onSuccess(callStateVersion);
+            }
             return response;
         } catch (RuntimeException e) {
-            onFailure();
+            synchronized (stateLock) {
+                onFailure(callStateVersion);
+            }
             throw e;
         }
     }
 
     public CircuitBreakerState getState() {
-        return state;
+        synchronized (stateLock) {
+            return state;
+        }
     }
 
     public float getFailureRate() {
-        return slidingWindow.getFailureRate();
+        synchronized (stateLock) {
+            return slidingWindow.getFailureRate();
+        }
     }
 
     private void checkCallPermitted() {
@@ -86,7 +101,11 @@ public class CircuitBreaker {
         }
     }
 
-    private void onSuccess() {
+    private void onSuccess(long callStateVersion) {
+        if (callStateVersion != stateVersion) {
+            return;
+        }
+
         if (state == CircuitBreakerState.CLOSED) {
             slidingWindow.recordSuccess();
             return;
@@ -101,7 +120,11 @@ public class CircuitBreaker {
         }
     }
 
-    private void onFailure() {
+    private void onFailure(long callStateVersion) {
+        if (callStateVersion != stateVersion) {
+            return;
+        }
+
         if (state == CircuitBreakerState.CLOSED) {
             slidingWindow.recordFailure();
 
@@ -119,6 +142,7 @@ public class CircuitBreaker {
 
     private void transitionToOpen() {
         this.state = CircuitBreakerState.OPEN;
+        this.stateVersion++;
         this.openStateAt = clock.instant();
         this.halfOpenCalls = 0;
         this.halfOpenSuccesses = 0;
@@ -128,10 +152,12 @@ public class CircuitBreaker {
         this.halfOpenCalls = 0;
         this.halfOpenSuccesses = 0;
         this.state = CircuitBreakerState.HALF_OPEN;
+        this.stateVersion++;
     }
 
     private void transitionToClosed() {
         this.state = CircuitBreakerState.CLOSED;
+        this.stateVersion++;
         this.slidingWindow.reset();
     }
 
