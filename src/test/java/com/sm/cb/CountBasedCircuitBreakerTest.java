@@ -6,6 +6,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.time.Duration;
+import java.time.Instant;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -13,6 +14,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 public class CountBasedCircuitBreakerTest {
     private CircuitBreakerConfig config;
     private CircuitBreaker cb;
+    private MutableClock clock;
 
     @BeforeEach
     void setUp() {
@@ -24,7 +26,8 @@ public class CountBasedCircuitBreakerTest {
                 Duration.ofMillis(200),
                 2
         );
-        this.cb = new CircuitBreaker(config);
+        this.clock = new MutableClock(Instant.parse("2026-01-01T00:00:00Z"));
+        this.cb = new CircuitBreaker(config, clock);
     }
 
     @Test
@@ -60,7 +63,7 @@ public class CountBasedCircuitBreakerTest {
     }
 
     @Test
-    void transitionToHalfOpenAndThenClosedOnSuccess() throws InterruptedException {
+    void transitionToHalfOpenAndThenClosedOnSuccess() {
         for (int i = 0; i < 4; i++) {
             assertThrows(RuntimeException.class, () -> cb.execute(() -> {
                 throw new RuntimeException("Simulated error");
@@ -68,7 +71,7 @@ public class CountBasedCircuitBreakerTest {
         }
         assertEquals(CircuitBreakerState.OPEN, cb.getState());
 
-        Thread.sleep(250);
+        clock.advance(Duration.ofMillis(200));
         cb.execute(() -> "Probe 1 OK");
 
         assertEquals(CircuitBreakerState.HALF_OPEN, cb.getState(), "Should transition to HALF_OPEN after timeout");
@@ -79,14 +82,14 @@ public class CountBasedCircuitBreakerTest {
     }
 
     @Test
-    void transitionToOpenIfProbeFailsInHalfOpen() throws InterruptedException {
+    void transitionToOpenIfProbeFailsInHalfOpen() {
         for (int i = 0; i < 4; i++) {
             assertThrows(RuntimeException.class, () -> cb.execute(() -> {
                 throw new RuntimeException("Simulated error");
             }));
         }
 
-        Thread.sleep(250);
+        clock.advance(Duration.ofMillis(200));
 
         cb.execute(() -> "Probe 1 OK");
         assertEquals(CircuitBreakerState.HALF_OPEN, cb.getState());
@@ -96,5 +99,22 @@ public class CountBasedCircuitBreakerTest {
         }));
 
         assertEquals(CircuitBreakerState.OPEN, cb.getState(), "Should instantly revert to OPEN if a probe fails");
+    }
+
+    @Test
+    void remainOpenUntilEntireWaitDurationPasses() {
+        for (int i = 0; i < 4; i++) {
+            assertThrows(RuntimeException.class, () -> cb.execute(() -> {
+                throw new RuntimeException("Simulated error");
+            }));
+        }
+
+        clock.advance(Duration.ofMillis(199));
+        assertThrows(CallNotPermittedException.class, () -> cb.execute(() -> "Too early"));
+        assertEquals(CircuitBreakerState.OPEN, cb.getState());
+
+        clock.advance(Duration.ofMillis(1));
+        cb.execute(() -> "Probe OK");
+        assertEquals(CircuitBreakerState.HALF_OPEN, cb.getState());
     }
 }

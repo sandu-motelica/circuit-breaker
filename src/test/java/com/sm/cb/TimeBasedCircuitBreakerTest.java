@@ -5,6 +5,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.time.Duration;
+import java.time.Instant;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -13,6 +14,7 @@ public class TimeBasedCircuitBreakerTest {
 
     private CircuitBreakerConfig config;
     private CircuitBreaker cb;
+    private MutableClock clock;
 
     @BeforeEach
     void setUp() {
@@ -24,11 +26,12 @@ public class TimeBasedCircuitBreakerTest {
                 Duration.ofSeconds(3),
                 2
         );
-        this.cb = new CircuitBreaker(config);
+        this.clock = new MutableClock(Instant.parse("2026-01-01T00:00:00Z"));
+        this.cb = new CircuitBreaker(config, clock);
     }
 
     @Test
-    void shouldForgetOldCallsWhenTimePasses() throws InterruptedException {
+    void shouldForgetOldCallsWhenTimePasses() {
         for (int i = 0; i < 3; i++) {
             assertThrows(RuntimeException.class, () -> cb.execute(() -> {
                 throw new RuntimeException("Simulated error");
@@ -37,7 +40,7 @@ public class TimeBasedCircuitBreakerTest {
 
         assertEquals(CircuitBreakerState.CLOSED, cb.getState());
         assertEquals(1.0f, cb.getFailureRate(), "Failure rate should be 100% currently");
-        Thread.sleep(2100);
+        clock.advance(Duration.ofSeconds(2));
 
         cb.execute(() -> "OK");
 

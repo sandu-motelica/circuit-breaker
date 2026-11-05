@@ -1,6 +1,7 @@
 package com.sm.cb.window;
 
 import java.time.Clock;
+import java.util.Objects;
 
 public class TimeBasedSlidingWindow implements SlidingWindow {
     private static class SecondBucket {
@@ -19,16 +20,19 @@ public class TimeBasedSlidingWindow implements SlidingWindow {
         }
     }
 
-
     private final SecondBucket[] buckets;
     private final int windowSizeInSeconds;
     private final Clock clock;
 
     public TimeBasedSlidingWindow(int windowSizeInSeconds) {
+        this(windowSizeInSeconds, Clock.systemUTC());
+    }
+
+    public TimeBasedSlidingWindow(int windowSizeInSeconds, Clock clock) {
         if (windowSizeInSeconds <= 0) throw new IllegalArgumentException("Window size must be greater than 0s");
         this.windowSizeInSeconds = windowSizeInSeconds;
         this.buckets = new SecondBucket[windowSizeInSeconds];
-        this.clock = Clock.systemUTC();
+        this.clock = Objects.requireNonNull(clock, "Clock must not be null");
 
         for (int i = 0; i < windowSizeInSeconds; i++) {
             buckets[i] = new SecondBucket();

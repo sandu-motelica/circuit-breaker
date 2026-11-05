@@ -19,6 +19,9 @@ public class CircuitBreakerConfig {
         if (slidingWindowSize <= 0) {
             throw new IllegalArgumentException("Sliding window size must be greater than 0");
         }
+        if (slidingWindowType == null) {
+            throw new IllegalArgumentException("Sliding window type must not be null");
+        }
         if (durationInOpenState == null || durationInOpenState.isNegative() || durationInOpenState.isZero()) {
             throw new IllegalArgumentException("Wait duration must be positive");
         }
@@ -27,6 +30,9 @@ public class CircuitBreakerConfig {
         }
         if (minimumCalls <= 0) {
             throw new IllegalArgumentException("Minimum number of calls must be greater than 0");
+        }
+        if (slidingWindowType == SlidingWindowType.COUNT_BASED && minimumCalls > slidingWindowSize) {
+            throw new IllegalArgumentException("Minimum number of calls must not exceed count-based window size");
         }
 
         this.failureRateThreshold = failureRateThreshold;

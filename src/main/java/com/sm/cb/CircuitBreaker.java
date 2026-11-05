@@ -22,17 +22,24 @@ public class CircuitBreaker {
     private int halfOpenCalls;
 
     public CircuitBreaker(CircuitBreakerConfig config) {
+        this(config, Clock.systemUTC());
+    }
+
+    public CircuitBreaker(CircuitBreakerConfig config, Clock clock) {
         if (config == null) {
             throw new IllegalArgumentException("Undefined circuit breaker config");
+        }
+        if (clock == null) {
+            throw new IllegalArgumentException("Clock must not be null");
         }
         this.config = config;
         this.state = CircuitBreakerState.CLOSED;
         if (config.getSlidingWindowType() == SlidingWindowType.COUNT_BASED) {
             this.slidingWindow = new CountBasedSlidingWindow(config.getSlidingWindowSize());
         } else {
-            this.slidingWindow = new TimeBasedSlidingWindow(config.getSlidingWindowSize());
+            this.slidingWindow = new TimeBasedSlidingWindow(config.getSlidingWindowSize(), clock);
         }
-        this.clock = Clock.systemUTC();
+        this.clock = clock;
         this.halfOpenSuccesses = 0;
         this.halfOpenCalls = 0;
     }
@@ -78,7 +85,6 @@ public class CircuitBreaker {
             halfOpenCalls++;
         }
     }
-
 
     private void onSuccess() {
         if (state == CircuitBreakerState.CLOSED) {
