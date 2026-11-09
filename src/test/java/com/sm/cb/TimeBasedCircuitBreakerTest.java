@@ -18,14 +18,14 @@ public class TimeBasedCircuitBreakerTest {
 
     @BeforeEach
     void setUp() {
-        this.config = new CircuitBreakerConfig(
-                0.5f,
-                2,
-                4,
-                SlidingWindowType.TIME_BASED,
-                Duration.ofSeconds(3),
-                2
-        );
+        this.config = CircuitBreakerConfig.builder()
+                .failureRateThreshold(0.5f)
+                .slidingWindowSize(2)
+                .minimumCalls(4)
+                .slidingWindowType(SlidingWindowType.TIME_BASED)
+                .durationInOpenState(Duration.ofSeconds(3))
+                .permittedCallsInHalfOpen(2)
+                .build();
         this.clock = new MutableClock(Instant.parse("2026-01-01T00:00:00Z"));
         this.cb = new CircuitBreaker(config, clock);
     }

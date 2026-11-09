@@ -27,14 +27,14 @@ public class CountBasedCircuitBreakerTest {
 
     @BeforeEach
     void setUp() {
-        this.config = new CircuitBreakerConfig(
-                0.5f,
-                5,
-                4,
-                SlidingWindowType.COUNT_BASED,
-                Duration.ofMillis(200),
-                2
-        );
+        this.config = CircuitBreakerConfig.builder()
+                .failureRateThreshold(0.5f)
+                .slidingWindowSize(5)
+                .minimumCalls(4)
+                .slidingWindowType(SlidingWindowType.COUNT_BASED)
+                .durationInOpenState(Duration.ofMillis(200))
+                .permittedCallsInHalfOpen(2)
+                .build();
         this.clock = new MutableClock(Instant.parse("2026-01-01T00:00:00Z"));
         this.cb = new CircuitBreaker(config, clock);
     }

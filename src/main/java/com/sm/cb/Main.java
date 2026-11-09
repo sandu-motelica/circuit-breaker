@@ -9,14 +9,14 @@ public class Main {
 
     public static void main(String[] args) throws InterruptedException {
 
-        CircuitBreakerConfig config = new CircuitBreakerConfig(
-                0.5f,
-                5,
-                4,
-                SlidingWindowType.COUNT_BASED,
-                Duration.ofSeconds(3),
-                2
-        );
+        CircuitBreakerConfig config = CircuitBreakerConfig.builder()
+                .failureRateThreshold(0.5f)
+                .slidingWindowSize(5)
+                .minimumCalls(4)
+                .slidingWindowType(SlidingWindowType.COUNT_BASED)
+                .durationInOpenState(Duration.ofSeconds(3))
+                .permittedCallsInHalfOpen(2)
+                .build();
 
         CircuitBreaker cb = new CircuitBreaker(config);
 
