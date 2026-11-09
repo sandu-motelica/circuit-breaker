@@ -4,6 +4,7 @@ import com.sm.cb.window.SlidingWindowType;
 import org.junit.jupiter.api.Test;
 
 import java.time.Duration;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -21,6 +22,8 @@ class CircuitBreakerConfigTest {
         assertEquals(SlidingWindowType.COUNT_BASED, config.getSlidingWindowType());
         assertEquals(Duration.ofSeconds(60), config.getDurationInOpenState());
         assertEquals(10, config.getPermittedCallsInHalfOpen());
+        assertEquals(List.of(RuntimeException.class), config.getRecordedExceptionTypes());
+        assertEquals(List.of(), config.getIgnoredExceptionTypes());
     }
 
     @Test
@@ -32,6 +35,8 @@ class CircuitBreakerConfigTest {
                 .slidingWindowType(SlidingWindowType.TIME_BASED)
                 .durationInOpenState(Duration.ofSeconds(5))
                 .permittedCallsInHalfOpen(3)
+                .recordExceptions(ExternalServiceException.class)
+                .ignoreExceptions(UserValidationException.class)
                 .build();
 
         assertEquals(0.25f, config.getFailureRateThreshold());
@@ -40,6 +45,8 @@ class CircuitBreakerConfigTest {
         assertEquals(SlidingWindowType.TIME_BASED, config.getSlidingWindowType());
         assertEquals(Duration.ofSeconds(5), config.getDurationInOpenState());
         assertEquals(3, config.getPermittedCallsInHalfOpen());
+        assertEquals(List.of(ExternalServiceException.class), config.getRecordedExceptionTypes());
+        assertEquals(List.of(UserValidationException.class), config.getIgnoredExceptionTypes());
     }
 
     @Test
@@ -64,5 +71,17 @@ class CircuitBreakerConfigTest {
                 .minimumCalls(10)
                 .slidingWindowType(SlidingWindowType.TIME_BASED)
                 .build());
+    }
+
+    @Test
+    void rejectNullExceptionType() {
+        assertThrows(IllegalArgumentException.class, () -> CircuitBreakerConfig.builder()
+                .ignoreExceptions(UserValidationException.class, null));
+    }
+
+    private static class ExternalServiceException extends RuntimeException {
+    }
+
+    private static class UserValidationException extends RuntimeException {
     }
 }

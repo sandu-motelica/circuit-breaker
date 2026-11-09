@@ -3,6 +3,8 @@ package com.sm.cb;
 import com.sm.cb.window.SlidingWindowType;
 
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.List;
 
 public final class CircuitBreakerConfig {
     public static final float DEFAULT_FAILURE_RATE_THRESHOLD = 0.5f;
@@ -18,6 +20,8 @@ public final class CircuitBreakerConfig {
     private final Duration durationInOpenState;
     private final int permittedCallsInHalfOpen;
     private final int minimumCalls;
+    private final List<Class<? extends RuntimeException>> recordedExceptionTypes;
+    private final List<Class<? extends RuntimeException>> ignoredExceptionTypes;
 
     private CircuitBreakerConfig(Builder builder) {
         if (Float.isNaN(builder.failureRateThreshold)
@@ -53,6 +57,8 @@ public final class CircuitBreakerConfig {
         this.slidingWindowType = builder.slidingWindowType;
         this.durationInOpenState = builder.durationInOpenState;
         this.permittedCallsInHalfOpen = builder.permittedCallsInHalfOpen;
+        this.recordedExceptionTypes = builder.recordedExceptionTypes;
+        this.ignoredExceptionTypes = builder.ignoredExceptionTypes;
     }
 
     public static Builder builder() {
@@ -83,6 +89,56 @@ public final class CircuitBreakerConfig {
         return permittedCallsInHalfOpen;
     }
 
+    public List<Class<? extends RuntimeException>> getRecordedExceptionTypes() {
+        return recordedExceptionTypes;
+    }
+
+    public List<Class<? extends RuntimeException>> getIgnoredExceptionTypes() {
+        return ignoredExceptionTypes;
+    }
+
+    /**
+     * Returns whether the exception contributes to the failure rate.
+     * Ignored types take priority over recorded types.
+     */
+    public boolean shouldRecordException(RuntimeException exception) {
+        if (exception == null) {
+            throw new IllegalArgumentException("Exception must not be null");
+        }
+        if (matchesExceptionType(exception, ignoredExceptionTypes)) {
+            return false;
+        }
+        return matchesExceptionType(exception, recordedExceptionTypes);
+    }
+
+    private static boolean matchesExceptionType(
+            RuntimeException exception,
+            List<Class<? extends RuntimeException>> exceptionTypes) {
+        for (Class<? extends RuntimeException> exceptionType : exceptionTypes) {
+            if (exceptionType.isInstance(exception)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static List<Class<? extends RuntimeException>> copyExceptionTypes(
+            Class<? extends RuntimeException>[] exceptionTypes,
+            String propertyName) {
+        if (exceptionTypes == null) {
+            throw new IllegalArgumentException(propertyName + " must not be null");
+        }
+
+        List<Class<? extends RuntimeException>> copy = new ArrayList<>(exceptionTypes.length);
+        for (Class<? extends RuntimeException> exceptionType : exceptionTypes) {
+            if (exceptionType == null) {
+                throw new IllegalArgumentException(propertyName + " must not contain null");
+            }
+            copy.add(exceptionType);
+        }
+        return List.copyOf(copy);
+    }
+
     public static final class Builder {
         private float failureRateThreshold = DEFAULT_FAILURE_RATE_THRESHOLD;
         private int slidingWindowSize = DEFAULT_SLIDING_WINDOW_SIZE;
@@ -90,6 +146,9 @@ public final class CircuitBreakerConfig {
         private SlidingWindowType slidingWindowType = DEFAULT_SLIDING_WINDOW_TYPE;
         private Duration durationInOpenState = DEFAULT_DURATION_IN_OPEN_STATE;
         private int permittedCallsInHalfOpen = DEFAULT_PERMITTED_CALLS_IN_HALF_OPEN;
+        private List<Class<? extends RuntimeException>> recordedExceptionTypes =
+                List.of(RuntimeException.class);
+        private List<Class<? extends RuntimeException>> ignoredExceptionTypes = List.of();
 
         private Builder() {
         }
@@ -121,6 +180,18 @@ public final class CircuitBreakerConfig {
 
         public Builder permittedCallsInHalfOpen(int permittedCallsInHalfOpen) {
             this.permittedCallsInHalfOpen = permittedCallsInHalfOpen;
+            return this;
+        }
+
+        @SafeVarargs
+        public final Builder recordExceptions(Class<? extends RuntimeException>... exceptionTypes) {
+            this.recordedExceptionTypes = copyExceptionTypes(exceptionTypes, "Recorded exception types");
+            return this;
+        }
+
+        @SafeVarargs
+        public final Builder ignoreExceptions(Class<? extends RuntimeException>... exceptionTypes) {
+            this.ignoredExceptionTypes = copyExceptionTypes(exceptionTypes, "Ignored exception types");
             return this;
         }
 

@@ -64,8 +64,13 @@ public class CircuitBreaker {
             }
             return response;
         } catch (RuntimeException e) {
+            boolean shouldRecordException = config.shouldRecordException(e);
             synchronized (stateLock) {
-                onFailure(callStateVersion);
+                if (shouldRecordException) {
+                    onFailure(callStateVersion);
+                } else {
+                    onIgnoredException(callStateVersion);
+                }
             }
             throw e;
         }
@@ -137,6 +142,16 @@ public class CircuitBreaker {
 
         if (state == CircuitBreakerState.HALF_OPEN) {
             transitionToOpen();
+        }
+    }
+
+    private void onIgnoredException(long callStateVersion) {
+        if (callStateVersion != stateVersion) {
+            return;
+        }
+
+        if (state == CircuitBreakerState.HALF_OPEN) {
+            halfOpenCalls--;
         }
     }
 
