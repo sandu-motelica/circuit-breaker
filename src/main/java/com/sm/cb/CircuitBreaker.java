@@ -3,6 +3,7 @@ package com.sm.cb;
 import com.sm.cb.exception.CallNotPermittedException;
 import com.sm.cb.window.CountBasedSlidingWindow;
 import com.sm.cb.window.SlidingWindow;
+import com.sm.cb.window.SlidingWindowMetrics;
 import com.sm.cb.window.SlidingWindowType;
 import com.sm.cb.window.TimeBasedSlidingWindow;
 
@@ -22,6 +23,7 @@ public class CircuitBreaker {
     private final SlidingWindow slidingWindow;
     private int halfOpenSuccesses;
     private int halfOpenCalls;
+    private int halfOpenSlowCalls;
 
     public CircuitBreaker(CircuitBreakerConfig config) {
         this(config, Clock.systemUTC());
@@ -45,6 +47,7 @@ public class CircuitBreaker {
         this.clock = clock;
         this.halfOpenSuccesses = 0;
         this.halfOpenCalls = 0;
+        this.halfOpenSlowCalls = 0;
     }
 
     public <T> T execute(Supplier<T> supplier) {
@@ -56,18 +59,21 @@ public class CircuitBreaker {
             checkCallPermitted();
             callStateVersion = stateVersion;
         }
+        Instant callStartedAt = clock.instant();
 
         try {
             T response = supplier.get();
+            boolean slowCall = isSlowCall(callStartedAt);
             synchronized (stateLock) {
-                onSuccess(callStateVersion);
+                onSuccess(callStateVersion, slowCall);
             }
             return response;
         } catch (RuntimeException e) {
+            boolean slowCall = isSlowCall(callStartedAt);
             boolean shouldRecordException = config.shouldRecordException(e);
             synchronized (stateLock) {
                 if (shouldRecordException) {
-                    onFailure(callStateVersion);
+                    onFailure(callStateVersion, slowCall);
                 } else {
                     onIgnoredException(callStateVersion);
                 }
@@ -85,6 +91,12 @@ public class CircuitBreaker {
     public float getFailureRate() {
         synchronized (stateLock) {
             return slidingWindow.getFailureRate();
+        }
+    }
+
+    public float getSlowCallRate() {
+        synchronized (stateLock) {
+            return slidingWindow.getSlowCallRate();
         }
     }
 
@@ -106,43 +118,70 @@ public class CircuitBreaker {
         }
     }
 
-    private void onSuccess(long callStateVersion) {
+    private void onSuccess(long callStateVersion, boolean slowCall) {
         if (callStateVersion != stateVersion) {
             return;
         }
 
         if (state == CircuitBreakerState.CLOSED) {
-            slidingWindow.recordSuccess();
+            slidingWindow.recordSuccess(slowCall);
+            evaluateClosedState();
             return;
         }
 
         if (state == CircuitBreakerState.HALF_OPEN) {
             halfOpenSuccesses++;
+            if (slowCall) {
+                halfOpenSlowCalls++;
+            }
 
             if (halfOpenSuccesses >= config.getPermittedCallsInHalfOpen()) {
-                transitionToClosed();
+                float slowCallRate = (float) halfOpenSlowCalls / halfOpenSuccesses;
+                if (halfOpenSlowCalls > 0
+                        && slowCallRate >= config.getSlowCallRateThreshold()) {
+                    transitionToOpen();
+                } else {
+                    transitionToClosed();
+                }
             }
         }
     }
 
-    private void onFailure(long callStateVersion) {
+    private void onFailure(long callStateVersion, boolean slowCall) {
         if (callStateVersion != stateVersion) {
             return;
         }
 
         if (state == CircuitBreakerState.CLOSED) {
-            slidingWindow.recordFailure();
-
-            if (slidingWindow.getTotalCalls() >= config.getMinimumCalls() && slidingWindow.getFailureRate() >= config.getFailureRateThreshold()) {
-                transitionToOpen();
-            }
-
+            slidingWindow.recordFailure(slowCall);
+            evaluateClosedState();
             return;
         }
 
         if (state == CircuitBreakerState.HALF_OPEN) {
             transitionToOpen();
         }
+    }
+
+    private void evaluateClosedState() {
+        SlidingWindowMetrics metrics = slidingWindow.getMetrics();
+        if (metrics.totalCalls() < config.getMinimumCalls()) {
+            return;
+        }
+
+        boolean failureRateExceeded = metrics.failedCalls() > 0
+                && metrics.failureRate() >= config.getFailureRateThreshold();
+        boolean slowCallRateExceeded = metrics.slowCalls() > 0
+                && metrics.slowCallRate() >= config.getSlowCallRateThreshold();
+
+        if (failureRateExceeded || slowCallRateExceeded) {
+            transitionToOpen();
+        }
+    }
+
+    private boolean isSlowCall(Instant callStartedAt) {
+        Duration callDuration = Duration.between(callStartedAt, clock.instant());
+        return callDuration.compareTo(config.getSlowCallDurationThreshold()) >= 0;
     }
 
     private void onIgnoredException(long callStateVersion) {
@@ -161,11 +200,13 @@ public class CircuitBreaker {
         this.openStateAt = clock.instant();
         this.halfOpenCalls = 0;
         this.halfOpenSuccesses = 0;
+        this.halfOpenSlowCalls = 0;
     }
 
     private void transitionToHalfOpen() {
         this.halfOpenCalls = 0;
         this.halfOpenSuccesses = 0;
+        this.halfOpenSlowCalls = 0;
         this.state = CircuitBreakerState.HALF_OPEN;
         this.stateVersion++;
     }
@@ -173,6 +214,9 @@ public class CircuitBreaker {
     private void transitionToClosed() {
         this.state = CircuitBreakerState.CLOSED;
         this.stateVersion++;
+        this.halfOpenCalls = 0;
+        this.halfOpenSuccesses = 0;
+        this.halfOpenSlowCalls = 0;
         this.slidingWindow.reset();
     }
 

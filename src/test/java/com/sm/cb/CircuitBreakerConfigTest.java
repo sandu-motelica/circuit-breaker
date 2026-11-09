@@ -22,6 +22,8 @@ class CircuitBreakerConfigTest {
         assertEquals(SlidingWindowType.COUNT_BASED, config.getSlidingWindowType());
         assertEquals(Duration.ofSeconds(60), config.getDurationInOpenState());
         assertEquals(10, config.getPermittedCallsInHalfOpen());
+        assertEquals(1.0f, config.getSlowCallRateThreshold());
+        assertEquals(Duration.ofSeconds(60), config.getSlowCallDurationThreshold());
         assertEquals(List.of(RuntimeException.class), config.getRecordedExceptionTypes());
         assertEquals(List.of(), config.getIgnoredExceptionTypes());
     }
@@ -35,6 +37,8 @@ class CircuitBreakerConfigTest {
                 .slidingWindowType(SlidingWindowType.TIME_BASED)
                 .durationInOpenState(Duration.ofSeconds(5))
                 .permittedCallsInHalfOpen(3)
+                .slowCallRateThreshold(0.4f)
+                .slowCallDurationThreshold(Duration.ofMillis(500))
                 .recordExceptions(ExternalServiceException.class)
                 .ignoreExceptions(UserValidationException.class)
                 .build();
@@ -45,6 +49,8 @@ class CircuitBreakerConfigTest {
         assertEquals(SlidingWindowType.TIME_BASED, config.getSlidingWindowType());
         assertEquals(Duration.ofSeconds(5), config.getDurationInOpenState());
         assertEquals(3, config.getPermittedCallsInHalfOpen());
+        assertEquals(0.4f, config.getSlowCallRateThreshold());
+        assertEquals(Duration.ofMillis(500), config.getSlowCallDurationThreshold());
         assertEquals(List.of(ExternalServiceException.class), config.getRecordedExceptionTypes());
         assertEquals(List.of(UserValidationException.class), config.getIgnoredExceptionTypes());
     }
@@ -77,6 +83,19 @@ class CircuitBreakerConfigTest {
     void rejectNullExceptionType() {
         assertThrows(IllegalArgumentException.class, () -> CircuitBreakerConfig.builder()
                 .ignoreExceptions(UserValidationException.class, null));
+    }
+
+    @Test
+    void rejectInvalidSlowCallConfiguration() {
+        assertThrows(IllegalArgumentException.class, () -> CircuitBreakerConfig.builder()
+                .slowCallRateThreshold(Float.NaN)
+                .build());
+        assertThrows(IllegalArgumentException.class, () -> CircuitBreakerConfig.builder()
+                .slowCallRateThreshold(1.1f)
+                .build());
+        assertThrows(IllegalArgumentException.class, () -> CircuitBreakerConfig.builder()
+                .slowCallDurationThreshold(Duration.ZERO)
+                .build());
     }
 
     private static class ExternalServiceException extends RuntimeException {

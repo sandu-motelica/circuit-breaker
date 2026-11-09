@@ -7,7 +7,8 @@ public class TimeBasedSlidingWindow implements SlidingWindow {
     private static class SecondBucket {
         long second;
         int totalCalls;
-        int failures;
+        int failureCount;
+        int slowCallCount;
 
         public SecondBucket() {
             this.reset();
@@ -15,7 +16,8 @@ public class TimeBasedSlidingWindow implements SlidingWindow {
 
         void reset() {
             this.second = -1;
-            this.failures = 0;
+            this.failureCount = 0;
+            this.slowCallCount = 0;
             this.totalCalls = 0;
         }
     }
@@ -40,30 +42,30 @@ public class TimeBasedSlidingWindow implements SlidingWindow {
     }
 
     @Override
-    public synchronized void recordSuccess() {
-        record(true);
+    public synchronized void recordSuccess(boolean slow) {
+        record(false, slow);
     }
 
     @Override
-    public synchronized void recordFailure() {
-        record(false);
+    public synchronized void recordFailure(boolean slow) {
+        record(true, slow);
     }
 
     @Override
-    public synchronized float getFailureRate() {
+    public synchronized SlidingWindowMetrics getMetrics() {
         long nowSecond = currentSecond();
-        int totalFailures = 0, totalCalls = 0;
+        int totalFailures = 0;
+        int totalSlowCalls = 0;
+        int totalCalls = 0;
         for (int i = 0; i < windowSizeInSeconds; i++) {
             SecondBucket bucket = buckets[i];
             if (bucket.second >= 0 && bucket.second > nowSecond - windowSizeInSeconds) {
-                totalFailures += bucket.failures;
+                totalFailures += bucket.failureCount;
+                totalSlowCalls += bucket.slowCallCount;
                 totalCalls += bucket.totalCalls;
             }
         }
-        if (totalCalls == 0) {
-            return 0.0f;
-        }
-        return (float) totalFailures / totalCalls;
+        return new SlidingWindowMetrics(totalCalls, totalFailures, totalSlowCalls);
     }
 
     @Override
@@ -73,21 +75,7 @@ public class TimeBasedSlidingWindow implements SlidingWindow {
         }
     }
 
-    @Override
-    public synchronized int getTotalCalls() {
-        long nowSecond = currentSecond();
-        int total = 0;
-
-        for (int i = 0; i < windowSizeInSeconds; i++) {
-            SecondBucket bucket = buckets[i];
-            if (bucket.second >= 0 && bucket.second > nowSecond - windowSizeInSeconds) {
-                total += bucket.totalCalls;
-            }
-        }
-        return total;
-    }
-
-    private void record(boolean success) {
+    private void record(boolean failure, boolean slowCall) {
         long nowSecond = currentSecond();
 
         int index = (int) (nowSecond % windowSizeInSeconds);
@@ -97,13 +85,17 @@ public class TimeBasedSlidingWindow implements SlidingWindow {
         if (bucket.second != nowSecond) {
             bucket.second = nowSecond;
             bucket.totalCalls = 0;
-            bucket.failures = 0;
+            bucket.failureCount = 0;
+            bucket.slowCallCount = 0;
         }
 
         bucket.totalCalls++;
 
-        if (!success) {
-            bucket.failures++;
+        if (failure) {
+            bucket.failureCount++;
+        }
+        if (slowCall) {
+            bucket.slowCallCount++;
         }
     }
 

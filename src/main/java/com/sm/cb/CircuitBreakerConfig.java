@@ -13,6 +13,8 @@ public final class CircuitBreakerConfig {
     public static final SlidingWindowType DEFAULT_SLIDING_WINDOW_TYPE = SlidingWindowType.COUNT_BASED;
     public static final Duration DEFAULT_DURATION_IN_OPEN_STATE = Duration.ofSeconds(60);
     public static final int DEFAULT_PERMITTED_CALLS_IN_HALF_OPEN = 10;
+    public static final float DEFAULT_SLOW_CALL_RATE_THRESHOLD = 1.0f;
+    public static final Duration DEFAULT_SLOW_CALL_DURATION_THRESHOLD = Duration.ofSeconds(60);
 
     private final float failureRateThreshold;
     private final int slidingWindowSize;
@@ -20,6 +22,8 @@ public final class CircuitBreakerConfig {
     private final Duration durationInOpenState;
     private final int permittedCallsInHalfOpen;
     private final int minimumCalls;
+    private final float slowCallRateThreshold;
+    private final Duration slowCallDurationThreshold;
     private final List<Class<? extends RuntimeException>> recordedExceptionTypes;
     private final List<Class<? extends RuntimeException>> ignoredExceptionTypes;
 
@@ -46,6 +50,16 @@ public final class CircuitBreakerConfig {
         if (builder.minimumCalls <= 0) {
             throw new IllegalArgumentException("Minimum number of calls must be greater than 0");
         }
+        if (Float.isNaN(builder.slowCallRateThreshold)
+                || builder.slowCallRateThreshold < 0.0f
+                || builder.slowCallRateThreshold > 1.0f) {
+            throw new IllegalArgumentException("Slow call rate threshold must be between 0 and 1");
+        }
+        if (builder.slowCallDurationThreshold == null
+                || builder.slowCallDurationThreshold.isNegative()
+                || builder.slowCallDurationThreshold.isZero()) {
+            throw new IllegalArgumentException("Slow call duration threshold must be positive");
+        }
         if (builder.slidingWindowType == SlidingWindowType.COUNT_BASED
                 && builder.minimumCalls > builder.slidingWindowSize) {
             throw new IllegalArgumentException("Minimum number of calls must not exceed count-based window size");
@@ -57,6 +71,8 @@ public final class CircuitBreakerConfig {
         this.slidingWindowType = builder.slidingWindowType;
         this.durationInOpenState = builder.durationInOpenState;
         this.permittedCallsInHalfOpen = builder.permittedCallsInHalfOpen;
+        this.slowCallRateThreshold = builder.slowCallRateThreshold;
+        this.slowCallDurationThreshold = builder.slowCallDurationThreshold;
         this.recordedExceptionTypes = builder.recordedExceptionTypes;
         this.ignoredExceptionTypes = builder.ignoredExceptionTypes;
     }
@@ -87,6 +103,14 @@ public final class CircuitBreakerConfig {
 
     public int getPermittedCallsInHalfOpen() {
         return permittedCallsInHalfOpen;
+    }
+
+    public float getSlowCallRateThreshold() {
+        return slowCallRateThreshold;
+    }
+
+    public Duration getSlowCallDurationThreshold() {
+        return slowCallDurationThreshold;
     }
 
     public List<Class<? extends RuntimeException>> getRecordedExceptionTypes() {
@@ -146,6 +170,8 @@ public final class CircuitBreakerConfig {
         private SlidingWindowType slidingWindowType = DEFAULT_SLIDING_WINDOW_TYPE;
         private Duration durationInOpenState = DEFAULT_DURATION_IN_OPEN_STATE;
         private int permittedCallsInHalfOpen = DEFAULT_PERMITTED_CALLS_IN_HALF_OPEN;
+        private float slowCallRateThreshold = DEFAULT_SLOW_CALL_RATE_THRESHOLD;
+        private Duration slowCallDurationThreshold = DEFAULT_SLOW_CALL_DURATION_THRESHOLD;
         private List<Class<? extends RuntimeException>> recordedExceptionTypes =
                 List.of(RuntimeException.class);
         private List<Class<? extends RuntimeException>> ignoredExceptionTypes = List.of();
@@ -180,6 +206,16 @@ public final class CircuitBreakerConfig {
 
         public Builder permittedCallsInHalfOpen(int permittedCallsInHalfOpen) {
             this.permittedCallsInHalfOpen = permittedCallsInHalfOpen;
+            return this;
+        }
+
+        public Builder slowCallRateThreshold(float slowCallRateThreshold) {
+            this.slowCallRateThreshold = slowCallRateThreshold;
+            return this;
+        }
+
+        public Builder slowCallDurationThreshold(Duration slowCallDurationThreshold) {
+            this.slowCallDurationThreshold = slowCallDurationThreshold;
             return this;
         }
 

@@ -15,15 +15,17 @@ class TimeBasedSlidingWindowTest {
     void expireCallsAtWindowBoundary() {
         MutableClock clock = new MutableClock(Instant.parse("2026-01-01T00:00:00Z"));
         TimeBasedSlidingWindow window = new TimeBasedSlidingWindow(2, clock);
-        window.recordFailure();
+        window.recordFailure(true);
 
         clock.advance(Duration.ofSeconds(1));
         assertEquals(1, window.getTotalCalls());
         assertEquals(1.0f, window.getFailureRate());
+        assertEquals(1.0f, window.getSlowCallRate());
 
         clock.advance(Duration.ofSeconds(1));
         assertEquals(0, window.getTotalCalls());
         assertEquals(0.0f, window.getFailureRate());
+        assertEquals(0.0f, window.getSlowCallRate());
     }
 
     @Test
@@ -32,9 +34,10 @@ class TimeBasedSlidingWindowTest {
         MutableClock clock = new MutableClock(Instant.parse("2026-01-01T00:00:00Z"));
         TimeBasedSlidingWindow window = new TimeBasedSlidingWindow(2, clock);
 
-        ConcurrentTestSupport.runConcurrently(numberOfCalls, window::recordFailure);
+        ConcurrentTestSupport.runConcurrently(numberOfCalls, () -> window.recordFailure(true));
 
         assertEquals(numberOfCalls, window.getTotalCalls());
         assertEquals(1.0f, window.getFailureRate());
+        assertEquals(1.0f, window.getSlowCallRate());
     }
 }

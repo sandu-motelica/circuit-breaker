@@ -1,13 +1,31 @@
 package com.sm.cb.window;
 
 public interface SlidingWindow {
-    void recordSuccess();
+    default void recordSuccess() {
+        recordSuccess(false);
+    }
 
-    void recordFailure();
+    default void recordFailure() {
+        recordFailure(false);
+    }
 
-    float getFailureRate();
+    void recordSuccess(boolean slow);
+
+    void recordFailure(boolean slow);
+
+    SlidingWindowMetrics getMetrics();
+
+    default float getFailureRate() {
+        return getMetrics().failureRate();
+    }
+
+    default float getSlowCallRate() {
+        return getMetrics().slowCallRate();
+    }
 
     void reset();
 
-    int getTotalCalls();
+    default int getTotalCalls() {
+        return getMetrics().totalCalls();
+    }
 }

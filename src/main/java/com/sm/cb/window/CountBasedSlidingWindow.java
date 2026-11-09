@@ -1,11 +1,13 @@
 package com.sm.cb.window;
 
 public class CountBasedSlidingWindow implements SlidingWindow {
-    private final boolean[] outcomes;
+    private final boolean[] failureOutcomes;
+    private final boolean[] slowCallOutcomes;
     private final int size;
 
     private int currentIndex;
-    private int failures;
+    private int failureCount;
+    private int slowCallCount;
     private int totalCalls;
 
 
@@ -14,52 +16,55 @@ public class CountBasedSlidingWindow implements SlidingWindow {
 
         this.size = size;
         this.currentIndex = 0;
-        this.failures = 0;
+        this.failureCount = 0;
+        this.slowCallCount = 0;
         this.totalCalls = 0;
-        this.outcomes = new boolean[size];
+        this.failureOutcomes = new boolean[size];
+        this.slowCallOutcomes = new boolean[size];
     }
 
     @Override
-    public synchronized void recordSuccess() {
-        record(true);
+    public synchronized void recordSuccess(boolean slow) {
+        record(false, slow);
     }
 
     @Override
-    public synchronized void recordFailure() {
-        record(false);
+    public synchronized void recordFailure(boolean slow) {
+        record(true, slow);
     }
 
     @Override
-    public synchronized float getFailureRate() {
-        if (totalCalls == 0) return 0.0f;
-        return (float) failures / totalCalls;
+    public synchronized SlidingWindowMetrics getMetrics() {
+        return new SlidingWindowMetrics(totalCalls, failureCount, slowCallCount);
     }
 
     @Override
     public synchronized void reset() {
-        this.failures = 0;
+        this.failureCount = 0;
+        this.slowCallCount = 0;
         this.currentIndex = 0;
         this.totalCalls = 0;
     }
 
-    @Override
-    public synchronized int getTotalCalls() {
-        return totalCalls;
-    }
-
-    private void record(boolean success) {
+    private void record(boolean failure, boolean slowCall) {
         if (totalCalls == size) {
-            boolean oldOutcome = outcomes[currentIndex];
-            if (!oldOutcome) {
-                failures--;
+            if (failureOutcomes[currentIndex]) {
+                failureCount--;
+            }
+            if (slowCallOutcomes[currentIndex]) {
+                slowCallCount--;
             }
         } else {
             totalCalls++;
         }
-        outcomes[currentIndex] = success;
+        failureOutcomes[currentIndex] = failure;
+        slowCallOutcomes[currentIndex] = slowCall;
 
-        if (!success) {
-            failures++;
+        if (failure) {
+            failureCount++;
+        }
+        if (slowCall) {
+            slowCallCount++;
         }
         currentIndex = (currentIndex + 1) % size;
     }
