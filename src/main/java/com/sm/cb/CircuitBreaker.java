@@ -1,6 +1,8 @@
 package com.sm.cb;
 
 import com.sm.cb.exception.CallNotPermittedException;
+import com.sm.cb.observability.CircuitBreakerStatistics;
+import com.sm.cb.observability.CircuitBreakerEventPublisher;
 import com.sm.cb.window.CountBasedSlidingWindow;
 import com.sm.cb.window.SlidingWindow;
 import com.sm.cb.window.SlidingWindowMetrics;
@@ -22,6 +24,8 @@ public class CircuitBreaker {
     private long stateVersion;
     private final SlidingWindow slidingWindow;
     private final HalfOpenCallTracker halfOpenCallTracker;
+    private final CircuitBreakerStatisticsCollector statisticsCollector;
+    private final DefaultCircuitBreakerEventPublisher eventPublisher;
 
     public CircuitBreaker(CircuitBreakerConfig config) {
         this(config, Clock.systemUTC());
@@ -44,37 +48,57 @@ public class CircuitBreaker {
         }
         this.clock = clock;
         this.halfOpenCallTracker = new HalfOpenCallTracker();
+        this.statisticsCollector = new CircuitBreakerStatisticsCollector();
+        this.eventPublisher = new DefaultCircuitBreakerEventPublisher(clock);
     }
 
     public <T> T execute(Supplier<T> supplier) {
         if (supplier == null) {
             throw new IllegalArgumentException("Supplier must not be null");
         }
-        long callStateVersion;
-        synchronized (stateLock) {
-            checkCallPermitted();
-            callStateVersion = stateVersion;
-        }
-        Instant callStartedAt = clock.instant();
 
+        long callStateVersion = 0;
+        CircuitBreakerState stateBeforePermission;
+        CircuitBreakerState stateAfterPermission;
+        CallNotPermittedException rejection = null;
+        synchronized (stateLock) {
+            stateBeforePermission = state;
+            try {
+                checkCallPermitted();
+                callStateVersion = stateVersion;
+            } catch (CallNotPermittedException e) {
+                statisticsCollector.recordRejectedCall();
+                rejection = e;
+            }
+            stateAfterPermission = state;
+        }
+
+        eventPublisher.publishStateTransition(stateBeforePermission, stateAfterPermission);
+        if (rejection != null) {
+            eventPublisher.publishRejected(stateAfterPermission, rejection.getMessage());
+            throw rejection;
+        }
+
+        Instant callStartedAt = clock.instant();
+        T response;
         try {
-            T response = supplier.get();
-            boolean slowCall = isSlowCall(callStartedAt);
-            synchronized (stateLock) {
-                onSuccess(callStateVersion, slowCall);
-            }
-            return response;
+            response = supplier.get();
         } catch (RuntimeException e) {
-            boolean slowCall = isSlowCall(callStartedAt);
-            boolean shouldRecordException = config.shouldRecordException(e);
-            synchronized (stateLock) {
-                if (shouldRecordException) {
-                    onFailure(callStateVersion, slowCall);
-                } else {
-                    onIgnoredException(callStateVersion);
-                }
-            }
+            processException(callStateVersion, callStartedAt, e);
             throw e;
+        }
+
+        processSuccess(callStateVersion, callStartedAt);
+        return response;
+    }
+
+    public CircuitBreakerEventPublisher getEventPublisher() {
+        return eventPublisher;
+    }
+
+    public CircuitBreakerStatistics getStatistics() {
+        synchronized (stateLock) {
+            return statisticsCollector.snapshot();
         }
     }
 
@@ -94,6 +118,50 @@ public class CircuitBreaker {
         synchronized (stateLock) {
             return slidingWindow.getSlowCallRate();
         }
+    }
+
+    private void processSuccess(long callStateVersion, Instant callStartedAt) {
+        Duration callDuration = getCallDuration(callStartedAt);
+        boolean slowCall = isSlowCall(callDuration);
+        CircuitBreakerState stateBeforeCompletion;
+        CircuitBreakerState stateAfterCompletion;
+        synchronized (stateLock) {
+            statisticsCollector.recordCall(callDuration, false);
+            stateBeforeCompletion = state;
+            onSuccess(callStateVersion, slowCall);
+            stateAfterCompletion = state;
+        }
+
+        eventPublisher.publishSuccess(callDuration, slowCall);
+        eventPublisher.publishStateTransition(stateBeforeCompletion, stateAfterCompletion);
+    }
+
+    private void processException(
+            long callStateVersion,
+            Instant callStartedAt,
+            RuntimeException exception) {
+        Duration callDuration = getCallDuration(callStartedAt);
+        boolean slowCall = isSlowCall(callDuration);
+        boolean shouldRecordException = config.shouldRecordException(exception);
+        CircuitBreakerState stateBeforeCompletion;
+        CircuitBreakerState stateAfterCompletion;
+        synchronized (stateLock) {
+            statisticsCollector.recordCall(callDuration, shouldRecordException);
+            stateBeforeCompletion = state;
+            if (shouldRecordException) {
+                onFailure(callStateVersion, slowCall);
+            } else {
+                onIgnoredException(callStateVersion);
+            }
+            stateAfterCompletion = state;
+        }
+
+        if (shouldRecordException) {
+            eventPublisher.publishFailure(callDuration, exception, slowCall);
+        } else {
+            eventPublisher.publishIgnored(callDuration, exception);
+        }
+        eventPublisher.publishStateTransition(stateBeforeCompletion, stateAfterCompletion);
     }
 
     private void checkCallPermitted() {
@@ -185,8 +253,12 @@ public class CircuitBreaker {
         }
     }
 
-    private boolean isSlowCall(Instant callStartedAt) {
+    private Duration getCallDuration(Instant callStartedAt) {
         Duration callDuration = Duration.between(callStartedAt, clock.instant());
+        return callDuration.isNegative() ? Duration.ZERO : callDuration;
+    }
+
+    private boolean isSlowCall(Duration callDuration) {
         return callDuration.compareTo(config.getSlowCallDurationThreshold()) >= 0;
     }
 

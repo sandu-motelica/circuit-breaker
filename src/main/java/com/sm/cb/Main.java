@@ -1,6 +1,7 @@
 package com.sm.cb;
 
 import com.sm.cb.exception.CallNotPermittedException;
+import com.sm.cb.observability.CircuitBreakerStatistics;
 import com.sm.cb.window.SlidingWindowType;
 
 import java.time.Duration;
@@ -23,6 +24,7 @@ public class Main {
                 .build();
 
         CircuitBreaker cb = new CircuitBreaker(config);
+        cb.getEventPublisher().addListener(event -> System.out.println("[EVENT] " + event));
 
         Random random = new Random();
 
@@ -77,6 +79,15 @@ public class Main {
                     metricsSource,
                     cb.getFailureRate() * 100,
                     cb.getSlowCallRate() * 100
+            );
+
+            CircuitBreakerStatistics statistics = cb.getStatistics();
+            System.out.printf(
+                    "Statistics: total = %d, failed = %d, rejected = %d, average = %d ms%n",
+                    statistics.totalCalls(),
+                    statistics.failedCalls(),
+                    statistics.rejectedCalls(),
+                    statistics.averageDuration().toMillis()
             );
 
             Thread.sleep(500);
