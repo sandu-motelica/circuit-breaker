@@ -22,6 +22,8 @@ class CircuitBreakerConfigTest {
         assertEquals(SlidingWindowType.COUNT_BASED, config.getSlidingWindowType());
         assertEquals(Duration.ofSeconds(60), config.getDurationInOpenState());
         assertEquals(10, config.getPermittedCallsInHalfOpen());
+        assertEquals(10, config.getMaxConcurrentCallsInHalfOpen());
+        assertEquals(0.5f, config.getHalfOpenFailureRateThreshold());
         assertEquals(1.0f, config.getSlowCallRateThreshold());
         assertEquals(Duration.ofSeconds(60), config.getSlowCallDurationThreshold());
         assertEquals(List.of(RuntimeException.class), config.getRecordedExceptionTypes());
@@ -37,6 +39,8 @@ class CircuitBreakerConfigTest {
                 .slidingWindowType(SlidingWindowType.TIME_BASED)
                 .durationInOpenState(Duration.ofSeconds(5))
                 .permittedCallsInHalfOpen(3)
+                .maxConcurrentCallsInHalfOpen(2)
+                .halfOpenFailureRateThreshold(0.5f)
                 .slowCallRateThreshold(0.4f)
                 .slowCallDurationThreshold(Duration.ofMillis(500))
                 .recordExceptions(ExternalServiceException.class)
@@ -49,6 +53,8 @@ class CircuitBreakerConfigTest {
         assertEquals(SlidingWindowType.TIME_BASED, config.getSlidingWindowType());
         assertEquals(Duration.ofSeconds(5), config.getDurationInOpenState());
         assertEquals(3, config.getPermittedCallsInHalfOpen());
+        assertEquals(2, config.getMaxConcurrentCallsInHalfOpen());
+        assertEquals(0.5f, config.getHalfOpenFailureRateThreshold());
         assertEquals(0.4f, config.getSlowCallRateThreshold());
         assertEquals(Duration.ofMillis(500), config.getSlowCallDurationThreshold());
         assertEquals(List.of(ExternalServiceException.class), config.getRecordedExceptionTypes());
@@ -96,6 +102,32 @@ class CircuitBreakerConfigTest {
         assertThrows(IllegalArgumentException.class, () -> CircuitBreakerConfig.builder()
                 .slowCallDurationThreshold(Duration.ZERO)
                 .build());
+    }
+
+    @Test
+    void rejectInvalidHalfOpenConfiguration() {
+        assertThrows(IllegalArgumentException.class, () -> CircuitBreakerConfig.builder()
+                .halfOpenFailureRateThreshold(Float.NaN)
+                .build());
+        assertThrows(IllegalArgumentException.class, () -> CircuitBreakerConfig.builder()
+                .halfOpenFailureRateThreshold(1.1f)
+                .build());
+        assertThrows(IllegalArgumentException.class, () -> CircuitBreakerConfig.builder()
+                .maxConcurrentCallsInHalfOpen(0)
+                .build());
+        assertThrows(IllegalArgumentException.class, () -> CircuitBreakerConfig.builder()
+                .permittedCallsInHalfOpen(2)
+                .maxConcurrentCallsInHalfOpen(3)
+                .build());
+    }
+
+    @Test
+    void inheritGeneralFailureRateThresholdInHalfOpenWhenNotOverridden() {
+        CircuitBreakerConfig config = CircuitBreakerConfig.builder()
+                .failureRateThreshold(0.3f)
+                .build();
+
+        assertEquals(0.3f, config.getHalfOpenFailureRateThreshold());
     }
 
     private static class ExternalServiceException extends RuntimeException {

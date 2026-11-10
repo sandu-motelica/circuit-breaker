@@ -91,7 +91,7 @@ public class CountBasedCircuitBreakerTest {
     }
 
     @Test
-    void transitionToOpenIfProbeFailsInHalfOpen() {
+    void transitionToOpenWhenHalfOpenFailureRateReachesInheritedThreshold() {
         for (int i = 0; i < 4; i++) {
             assertThrows(RuntimeException.class, () -> cb.execute(() -> {
                 throw new RuntimeException("Simulated error");
@@ -107,7 +107,56 @@ public class CountBasedCircuitBreakerTest {
             throw new RuntimeException("Simulated probe error");
         }));
 
-        assertEquals(CircuitBreakerState.OPEN, cb.getState(), "Should instantly revert to OPEN if a probe fails");
+        assertEquals(CircuitBreakerState.OPEN, cb.getState(),
+                "HALF_OPEN should inherit the general 50% failure-rate threshold");
+    }
+
+    @Test
+    void transitionToOpenWhenAllHalfOpenProbesFailWithDefaultThreshold() {
+        for (int i = 0; i < 4; i++) {
+            assertThrows(RuntimeException.class, () -> cb.execute(() -> {
+                throw new RuntimeException("Simulated error");
+            }));
+        }
+        clock.advance(Duration.ofMillis(200));
+
+        assertThrows(RuntimeException.class, () -> cb.execute(() -> {
+            throw new RuntimeException("Probe 1 failed");
+        }));
+        assertEquals(CircuitBreakerState.HALF_OPEN, cb.getState());
+
+        assertThrows(RuntimeException.class, () -> cb.execute(() -> {
+            throw new RuntimeException("Probe 2 failed");
+        }));
+        assertEquals(CircuitBreakerState.OPEN, cb.getState());
+    }
+
+    @Test
+    void transitionToClosedWhenHalfOpenFailureRateIsBelowSpecificThreshold() {
+        CircuitBreakerConfig thresholdConfig = CircuitBreakerConfig.builder()
+                .failureRateThreshold(0.5f)
+                .slidingWindowSize(5)
+                .minimumCalls(4)
+                .slidingWindowType(SlidingWindowType.COUNT_BASED)
+                .durationInOpenState(Duration.ofMillis(200))
+                .permittedCallsInHalfOpen(2)
+                .halfOpenFailureRateThreshold(1.0f)
+                .build();
+        CircuitBreaker thresholdCircuitBreaker = new CircuitBreaker(thresholdConfig, clock);
+
+        for (int i = 0; i < 4; i++) {
+            assertThrows(RuntimeException.class, () -> thresholdCircuitBreaker.execute(() -> {
+                throw new RuntimeException("Simulated error");
+            }));
+        }
+        clock.advance(Duration.ofMillis(200));
+
+        thresholdCircuitBreaker.execute(() -> "Probe 1 OK");
+        assertThrows(RuntimeException.class, () -> thresholdCircuitBreaker.execute(() -> {
+            throw new RuntimeException("Simulated probe error");
+        }));
+
+        assertEquals(CircuitBreakerState.CLOSED, thresholdCircuitBreaker.getState());
     }
 
     @Test
@@ -129,19 +178,30 @@ public class CountBasedCircuitBreakerTest {
 
     @Test
     void allowOnlyConfiguredNumberOfConcurrentHalfOpenCalls() throws Exception {
+        CircuitBreakerConfig concurrentConfig = CircuitBreakerConfig.builder()
+                .failureRateThreshold(0.5f)
+                .slidingWindowSize(5)
+                .minimumCalls(4)
+                .slidingWindowType(SlidingWindowType.COUNT_BASED)
+                .durationInOpenState(Duration.ofMillis(200))
+                .permittedCallsInHalfOpen(4)
+                .maxConcurrentCallsInHalfOpen(2)
+                .build();
+        CircuitBreaker concurrentCircuitBreaker = new CircuitBreaker(concurrentConfig, clock);
+
         for (int i = 0; i < 4; i++) {
-            assertThrows(RuntimeException.class, () -> cb.execute(() -> {
+            assertThrows(RuntimeException.class, () -> concurrentCircuitBreaker.execute(() -> {
                 throw new RuntimeException("Simulated error");
             }));
         }
         clock.advance(Duration.ofMillis(200));
 
         int totalAttempts = 10;
-        int permittedCalls = config.getPermittedCallsInHalfOpen();
+        int concurrentLimit = concurrentConfig.getMaxConcurrentCallsInHalfOpen();
         ExecutorService executor = Executors.newFixedThreadPool(totalAttempts);
         CountDownLatch startGate = new CountDownLatch(1);
-        CountDownLatch probesEntered = new CountDownLatch(permittedCalls);
-        CountDownLatch callsRejected = new CountDownLatch(totalAttempts - permittedCalls);
+        CountDownLatch probesEntered = new CountDownLatch(concurrentLimit);
+        CountDownLatch callsRejected = new CountDownLatch(totalAttempts - concurrentLimit);
         CountDownLatch releaseProbes = new CountDownLatch(1);
         AtomicInteger executedProbes = new AtomicInteger();
         List<Future<?>> futures = new ArrayList<>();
@@ -151,7 +211,7 @@ public class CountBasedCircuitBreakerTest {
                 futures.add(executor.submit(() -> {
                     ConcurrentTestSupport.await(startGate);
                     try {
-                        cb.execute(() -> {
+                        concurrentCircuitBreaker.execute(() -> {
                             executedProbes.incrementAndGet();
                             probesEntered.countDown();
                             ConcurrentTestSupport.await(releaseProbes);
@@ -176,8 +236,12 @@ public class CountBasedCircuitBreakerTest {
             executor.shutdownNow();
         }
 
-        assertEquals(permittedCalls, executedProbes.get());
-        assertEquals(CircuitBreakerState.CLOSED, cb.getState());
+        assertEquals(concurrentLimit, executedProbes.get());
+        assertEquals(CircuitBreakerState.HALF_OPEN, concurrentCircuitBreaker.getState());
+
+        concurrentCircuitBreaker.execute(() -> "Probe 3 OK");
+        concurrentCircuitBreaker.execute(() -> "Probe 4 OK");
+        assertEquals(CircuitBreakerState.CLOSED, concurrentCircuitBreaker.getState());
     }
 
     @Test

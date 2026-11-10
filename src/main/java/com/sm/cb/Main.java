@@ -1,5 +1,6 @@
 package com.sm.cb;
 
+import com.sm.cb.exception.CallNotPermittedException;
 import com.sm.cb.window.SlidingWindowType;
 
 import java.time.Duration;
@@ -27,6 +28,8 @@ public class Main {
 
         for (int i = 1; i <= 30; i++) {
             System.out.println("\n--- Call #" + i + " ---");
+            CircuitBreakerState stateBeforeCall = cb.getState();
+            System.out.println("State before call: " + stateBeforeCall);
 
             try {
                 String result = cb.execute(() -> {
@@ -51,14 +54,30 @@ public class Main {
                 });
 
                 System.out.println("Result: " + result);
-
-            } catch (Exception e) {
-                System.out.println("Exception: " + e.getMessage());
+            } catch (CallNotPermittedException e) {
+                System.out.println("Rejected call: " + e.getMessage());
+            } catch (IllegalArgumentException e) {
+                System.out.println("Ignored exception: " + e.getMessage());
+            } catch (RuntimeException e) {
+                System.out.println("Recorded failure: " + e.getMessage());
             }
 
-            System.out.println("Failure rate: " + cb.getFailureRate());
-            System.out.println("Slow call rate: " + cb.getSlowCallRate());
-            System.out.println("Resulting State: " + cb.getState());
+            CircuitBreakerState stateAfterCall = cb.getState();
+            if (stateBeforeCall != stateAfterCall) {
+                System.out.println("State transition: " + stateBeforeCall + " -> " + stateAfterCall);
+            } else {
+                System.out.println("State after call: " + stateAfterCall + " (unchanged)");
+            }
+
+            String metricsSource = stateAfterCall == CircuitBreakerState.CLOSED
+                    ? "current CLOSED window"
+                    : "last CLOSED window";
+            System.out.printf(
+                    "Metrics (%s): failure = %.0f%%, slow = %.0f%%%n",
+                    metricsSource,
+                    cb.getFailureRate() * 100,
+                    cb.getSlowCallRate() * 100
+            );
 
             Thread.sleep(500);
         }

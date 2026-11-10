@@ -21,9 +21,7 @@ public class CircuitBreaker {
     private CircuitBreakerState state;
     private long stateVersion;
     private final SlidingWindow slidingWindow;
-    private int halfOpenSuccesses;
-    private int halfOpenCalls;
-    private int halfOpenSlowCalls;
+    private final HalfOpenCallTracker halfOpenCallTracker;
 
     public CircuitBreaker(CircuitBreakerConfig config) {
         this(config, Clock.systemUTC());
@@ -45,9 +43,7 @@ public class CircuitBreaker {
             this.slidingWindow = new TimeBasedSlidingWindow(config.getSlidingWindowSize(), clock);
         }
         this.clock = clock;
-        this.halfOpenSuccesses = 0;
-        this.halfOpenCalls = 0;
-        this.halfOpenSlowCalls = 0;
+        this.halfOpenCallTracker = new HalfOpenCallTracker();
     }
 
     public <T> T execute(Supplier<T> supplier) {
@@ -110,11 +106,16 @@ public class CircuitBreaker {
             }
         }
         if (state == CircuitBreakerState.HALF_OPEN) {
-            if (halfOpenCalls >= config.getPermittedCallsInHalfOpen()) {
+            HalfOpenCallTracker.AdmissionResult admissionResult = halfOpenCallTracker.tryAcquire(
+                    config.getPermittedCallsInHalfOpen(),
+                    config.getMaxConcurrentCallsInHalfOpen()
+            );
+            if (admissionResult == HalfOpenCallTracker.AdmissionResult.TOTAL_LIMIT_REACHED) {
                 throw new CallNotPermittedException("Too many calls in HALF_OPEN");
             }
-
-            halfOpenCalls++;
+            if (admissionResult == HalfOpenCallTracker.AdmissionResult.CONCURRENT_LIMIT_REACHED) {
+                throw new CallNotPermittedException("Too many concurrent calls in HALF_OPEN");
+            }
         }
     }
 
@@ -130,20 +131,7 @@ public class CircuitBreaker {
         }
 
         if (state == CircuitBreakerState.HALF_OPEN) {
-            halfOpenSuccesses++;
-            if (slowCall) {
-                halfOpenSlowCalls++;
-            }
-
-            if (halfOpenSuccesses >= config.getPermittedCallsInHalfOpen()) {
-                float slowCallRate = (float) halfOpenSlowCalls / halfOpenSuccesses;
-                if (halfOpenSlowCalls > 0
-                        && slowCallRate >= config.getSlowCallRateThreshold()) {
-                    transitionToOpen();
-                } else {
-                    transitionToClosed();
-                }
-            }
+            completeHalfOpenCall(false, slowCall);
         }
     }
 
@@ -159,7 +147,25 @@ public class CircuitBreaker {
         }
 
         if (state == CircuitBreakerState.HALF_OPEN) {
+            completeHalfOpenCall(true, slowCall);
+        }
+    }
+
+    private void completeHalfOpenCall(boolean failure, boolean slowCall) {
+        halfOpenCallTracker.recordCompletion(failure, slowCall);
+        if (!halfOpenCallTracker.hasCompleted(config.getPermittedCallsInHalfOpen())) {
+            return;
+        }
+
+        boolean failureRateExceeded = halfOpenCallTracker.failureCount() > 0
+                && halfOpenCallTracker.failureRate() >= config.getHalfOpenFailureRateThreshold();
+        boolean slowCallRateExceeded = halfOpenCallTracker.slowCallCount() > 0
+                && halfOpenCallTracker.slowCallRate() >= config.getSlowCallRateThreshold();
+
+        if (failureRateExceeded || slowCallRateExceeded) {
             transitionToOpen();
+        } else {
+            transitionToClosed();
         }
     }
 
@@ -190,7 +196,7 @@ public class CircuitBreaker {
         }
 
         if (state == CircuitBreakerState.HALF_OPEN) {
-            halfOpenCalls--;
+            halfOpenCallTracker.recordIgnoredCall();
         }
     }
 
@@ -198,15 +204,11 @@ public class CircuitBreaker {
         this.state = CircuitBreakerState.OPEN;
         this.stateVersion++;
         this.openStateAt = clock.instant();
-        this.halfOpenCalls = 0;
-        this.halfOpenSuccesses = 0;
-        this.halfOpenSlowCalls = 0;
+        halfOpenCallTracker.reset();
     }
 
     private void transitionToHalfOpen() {
-        this.halfOpenCalls = 0;
-        this.halfOpenSuccesses = 0;
-        this.halfOpenSlowCalls = 0;
+        halfOpenCallTracker.reset();
         this.state = CircuitBreakerState.HALF_OPEN;
         this.stateVersion++;
     }
@@ -214,9 +216,7 @@ public class CircuitBreaker {
     private void transitionToClosed() {
         this.state = CircuitBreakerState.CLOSED;
         this.stateVersion++;
-        this.halfOpenCalls = 0;
-        this.halfOpenSuccesses = 0;
-        this.halfOpenSlowCalls = 0;
+        halfOpenCallTracker.reset();
         this.slidingWindow.reset();
     }
 

@@ -21,6 +21,8 @@ public final class CircuitBreakerConfig {
     private final SlidingWindowType slidingWindowType;
     private final Duration durationInOpenState;
     private final int permittedCallsInHalfOpen;
+    private final int maxConcurrentCallsInHalfOpen;
+    private final float halfOpenFailureRateThreshold;
     private final int minimumCalls;
     private final float slowCallRateThreshold;
     private final Duration slowCallDurationThreshold;
@@ -47,6 +49,22 @@ public final class CircuitBreakerConfig {
         if (builder.permittedCallsInHalfOpen <= 0) {
             throw new IllegalArgumentException("Permitted calls in half-open must be greater than 0");
         }
+        int maxConcurrentCallsInHalfOpen = builder.maxConcurrentCallsInHalfOpen == null
+                ? builder.permittedCallsInHalfOpen
+                : builder.maxConcurrentCallsInHalfOpen;
+        if (maxConcurrentCallsInHalfOpen <= 0) {
+            throw new IllegalArgumentException("Max concurrent calls in half-open must be greater than 0");
+        }
+        if (maxConcurrentCallsInHalfOpen > builder.permittedCallsInHalfOpen) {
+            throw new IllegalArgumentException(
+                    "Max concurrent calls in half-open must not exceed permitted calls in half-open");
+        }
+        if (builder.halfOpenFailureRateThreshold != null
+                && (Float.isNaN(builder.halfOpenFailureRateThreshold)
+                    || builder.halfOpenFailureRateThreshold < 0.0f
+                    || builder.halfOpenFailureRateThreshold > 1.0f)) {
+            throw new IllegalArgumentException("Half-open failure rate threshold must be between 0 and 1");
+        }
         if (builder.minimumCalls <= 0) {
             throw new IllegalArgumentException("Minimum number of calls must be greater than 0");
         }
@@ -71,6 +89,10 @@ public final class CircuitBreakerConfig {
         this.slidingWindowType = builder.slidingWindowType;
         this.durationInOpenState = builder.durationInOpenState;
         this.permittedCallsInHalfOpen = builder.permittedCallsInHalfOpen;
+        this.maxConcurrentCallsInHalfOpen = maxConcurrentCallsInHalfOpen;
+        this.halfOpenFailureRateThreshold = builder.halfOpenFailureRateThreshold == null
+                ? builder.failureRateThreshold
+                : builder.halfOpenFailureRateThreshold;
         this.slowCallRateThreshold = builder.slowCallRateThreshold;
         this.slowCallDurationThreshold = builder.slowCallDurationThreshold;
         this.recordedExceptionTypes = builder.recordedExceptionTypes;
@@ -103,6 +125,14 @@ public final class CircuitBreakerConfig {
 
     public int getPermittedCallsInHalfOpen() {
         return permittedCallsInHalfOpen;
+    }
+
+    public int getMaxConcurrentCallsInHalfOpen() {
+        return maxConcurrentCallsInHalfOpen;
+    }
+
+    public float getHalfOpenFailureRateThreshold() {
+        return halfOpenFailureRateThreshold;
     }
 
     public float getSlowCallRateThreshold() {
@@ -170,6 +200,8 @@ public final class CircuitBreakerConfig {
         private SlidingWindowType slidingWindowType = DEFAULT_SLIDING_WINDOW_TYPE;
         private Duration durationInOpenState = DEFAULT_DURATION_IN_OPEN_STATE;
         private int permittedCallsInHalfOpen = DEFAULT_PERMITTED_CALLS_IN_HALF_OPEN;
+        private Integer maxConcurrentCallsInHalfOpen;
+        private Float halfOpenFailureRateThreshold;
         private float slowCallRateThreshold = DEFAULT_SLOW_CALL_RATE_THRESHOLD;
         private Duration slowCallDurationThreshold = DEFAULT_SLOW_CALL_DURATION_THRESHOLD;
         private List<Class<? extends RuntimeException>> recordedExceptionTypes =
@@ -206,6 +238,16 @@ public final class CircuitBreakerConfig {
 
         public Builder permittedCallsInHalfOpen(int permittedCallsInHalfOpen) {
             this.permittedCallsInHalfOpen = permittedCallsInHalfOpen;
+            return this;
+        }
+
+        public Builder maxConcurrentCallsInHalfOpen(int maxConcurrentCallsInHalfOpen) {
+            this.maxConcurrentCallsInHalfOpen = maxConcurrentCallsInHalfOpen;
+            return this;
+        }
+
+        public Builder halfOpenFailureRateThreshold(float halfOpenFailureRateThreshold) {
+            this.halfOpenFailureRateThreshold = halfOpenFailureRateThreshold;
             return this;
         }
 
