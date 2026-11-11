@@ -22,7 +22,9 @@ public final class CircuitBreakerConfig {
     private final Duration durationInOpenState;
     private final int permittedCallsInHalfOpen;
     private final int maxConcurrentCallsInHalfOpen;
+    private final boolean maxConcurrentCallsInHalfOpenCustomized;
     private final float halfOpenFailureRateThreshold;
+    private final boolean halfOpenFailureRateThresholdCustomized;
     private final int minimumCalls;
     private final float slowCallRateThreshold;
     private final Duration slowCallDurationThreshold;
@@ -90,9 +92,11 @@ public final class CircuitBreakerConfig {
         this.durationInOpenState = builder.durationInOpenState;
         this.permittedCallsInHalfOpen = builder.permittedCallsInHalfOpen;
         this.maxConcurrentCallsInHalfOpen = maxConcurrentCallsInHalfOpen;
+        this.maxConcurrentCallsInHalfOpenCustomized = builder.maxConcurrentCallsInHalfOpen != null;
         this.halfOpenFailureRateThreshold = builder.halfOpenFailureRateThreshold == null
                 ? builder.failureRateThreshold
                 : builder.halfOpenFailureRateThreshold;
+        this.halfOpenFailureRateThresholdCustomized = builder.halfOpenFailureRateThreshold != null;
         this.slowCallRateThreshold = builder.slowCallRateThreshold;
         this.slowCallDurationThreshold = builder.slowCallDurationThreshold;
         this.recordedExceptionTypes = builder.recordedExceptionTypes;
@@ -101,6 +105,10 @@ public final class CircuitBreakerConfig {
 
     public static Builder builder() {
         return new Builder();
+    }
+
+    public Builder toBuilder() {
+        return new Builder(this);
     }
 
     public float getFailureRateThreshold() {
@@ -209,6 +217,25 @@ public final class CircuitBreakerConfig {
         private List<Class<? extends RuntimeException>> ignoredExceptionTypes = List.of();
 
         private Builder() {
+        }
+
+        private Builder(CircuitBreakerConfig config) {
+            this.failureRateThreshold = config.failureRateThreshold;
+            this.slidingWindowSize = config.slidingWindowSize;
+            this.minimumCalls = config.minimumCalls;
+            this.slidingWindowType = config.slidingWindowType;
+            this.durationInOpenState = config.durationInOpenState;
+            this.permittedCallsInHalfOpen = config.permittedCallsInHalfOpen;
+            this.maxConcurrentCallsInHalfOpen = config.maxConcurrentCallsInHalfOpenCustomized
+                    ? config.maxConcurrentCallsInHalfOpen
+                    : null;
+            this.halfOpenFailureRateThreshold = config.halfOpenFailureRateThresholdCustomized
+                    ? config.halfOpenFailureRateThreshold
+                    : null;
+            this.slowCallRateThreshold = config.slowCallRateThreshold;
+            this.slowCallDurationThreshold = config.slowCallDurationThreshold;
+            this.recordedExceptionTypes = config.recordedExceptionTypes;
+            this.ignoredExceptionTypes = config.ignoredExceptionTypes;
         }
 
         public Builder failureRateThreshold(float failureRateThreshold) {

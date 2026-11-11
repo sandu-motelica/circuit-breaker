@@ -2,6 +2,7 @@ package com.sm.cb;
 
 import com.sm.cb.exception.CallNotPermittedException;
 import com.sm.cb.observability.CircuitBreakerStatistics;
+import com.sm.cb.registry.CircuitBreakerRegistry;
 import com.sm.cb.window.SlidingWindowType;
 
 import java.time.Duration;
@@ -11,8 +12,8 @@ public class Main {
 
     public static void main(String[] args) throws InterruptedException {
 
-        CircuitBreakerConfig config = CircuitBreakerConfig.builder()
-                .failureRateThreshold(0.5f)
+        CircuitBreakerConfig commonConfig = CircuitBreakerConfig.builder()
+                .failureRateThreshold(0.7f)
                 .slowCallRateThreshold(0.5f)
                 .slowCallDurationThreshold(Duration.ofMillis(600))
                 .slidingWindowSize(5)
@@ -23,7 +24,16 @@ public class Main {
                 .ignoreExceptions(IllegalArgumentException.class)
                 .build();
 
-        CircuitBreaker cb = new CircuitBreaker(config);
+        CircuitBreakerConfig paymentServiceConfig = commonConfig.toBuilder()
+                .failureRateThreshold(0.5f)
+                .build();
+
+        CircuitBreakerRegistry registry = CircuitBreakerRegistry.builder()
+                .defaultConfig(commonConfig)
+                .serviceConfig("payment-service", paymentServiceConfig)
+                .build();
+
+        CircuitBreaker cb = registry.circuitBreaker("payment-service");
         cb.getEventPublisher().addListener(event -> System.out.println("[EVENT] " + event));
 
         Random random = new Random();

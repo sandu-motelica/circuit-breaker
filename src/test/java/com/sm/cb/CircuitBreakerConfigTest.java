@@ -130,6 +130,42 @@ class CircuitBreakerConfigTest {
         assertEquals(0.3f, config.getHalfOpenFailureRateThreshold());
     }
 
+    @Test
+    void copyConfigAndPreserveInheritedHalfOpenDefaults() {
+        CircuitBreakerConfig commonConfig = CircuitBreakerConfig.builder()
+                .failureRateThreshold(0.7f)
+                .permittedCallsInHalfOpen(4)
+                .build();
+
+        CircuitBreakerConfig serviceConfig = commonConfig.toBuilder()
+                .failureRateThreshold(0.3f)
+                .permittedCallsInHalfOpen(2)
+                .build();
+
+        assertEquals(0.3f, serviceConfig.getFailureRateThreshold());
+        assertEquals(0.3f, serviceConfig.getHalfOpenFailureRateThreshold());
+        assertEquals(2, serviceConfig.getPermittedCallsInHalfOpen());
+        assertEquals(2, serviceConfig.getMaxConcurrentCallsInHalfOpen());
+    }
+
+    @Test
+    void copyConfigAndPreserveExplicitHalfOpenOverrides() {
+        CircuitBreakerConfig commonConfig = CircuitBreakerConfig.builder()
+                .failureRateThreshold(0.7f)
+                .permittedCallsInHalfOpen(4)
+                .maxConcurrentCallsInHalfOpen(2)
+                .halfOpenFailureRateThreshold(0.9f)
+                .build();
+
+        CircuitBreakerConfig serviceConfig = commonConfig.toBuilder()
+                .failureRateThreshold(0.3f)
+                .permittedCallsInHalfOpen(3)
+                .build();
+
+        assertEquals(0.9f, serviceConfig.getHalfOpenFailureRateThreshold());
+        assertEquals(2, serviceConfig.getMaxConcurrentCallsInHalfOpen());
+    }
+
     private static class ExternalServiceException extends RuntimeException {
     }
 
