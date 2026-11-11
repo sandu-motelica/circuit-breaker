@@ -12,6 +12,7 @@ import com.sm.cb.window.TimeBasedSlidingWindow;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.function.Supplier;
@@ -59,17 +60,21 @@ public class CircuitBreaker {
             throw new IllegalArgumentException("Supplier must not be null");
         }
 
-        long callStateVersion = acquireCallPermission();
+        CallPermission callPermission = acquireCallPermission();
+        if (callPermission.ignoreResults()) {
+            return supplier.get();
+        }
+
         Instant callStartedAt = clock.instant();
         T response;
         try {
             response = supplier.get();
         } catch (RuntimeException e) {
-            processException(callStateVersion, callStartedAt, e);
+            processException(callPermission.stateVersion(), callStartedAt, e);
             throw e;
         }
 
-        processSuccess(callStateVersion, callStartedAt);
+        processSuccess(callPermission.stateVersion(), callStartedAt);
         return response;
     }
 
@@ -79,11 +84,22 @@ public class CircuitBreaker {
             throw new IllegalArgumentException("Supplier must not be null");
         }
 
-        long callStateVersion;
+        CallPermission callPermission;
         try {
-            callStateVersion = acquireCallPermission();
+            callPermission = acquireCallPermission();
         } catch (CallNotPermittedException exception) {
             return CompletableFuture.failedFuture(exception);
+        }
+
+        if (callPermission.ignoreResults()) {
+            try {
+                CompletableFuture<T> future = supplier.get();
+                return Objects.requireNonNullElseGet(future, () -> CompletableFuture.failedFuture(
+                        new IllegalStateException("Async supplier must not return null")
+                ));
+            } catch (RuntimeException exception) {
+                return CompletableFuture.failedFuture(exception);
+            }
         }
 
         Instant callStartedAt = clock.instant();
@@ -94,7 +110,7 @@ public class CircuitBreaker {
                 throw new IllegalStateException("Async supplier must not return null");
             }
         } catch (RuntimeException exception) {
-            processException(callStateVersion, callStartedAt, exception);
+            processException(callPermission.stateVersion(), callStartedAt, exception);
             return CompletableFuture.failedFuture(exception);
         }
 
@@ -102,10 +118,10 @@ public class CircuitBreaker {
         sourceFuture.whenComplete((result, exception) -> {
             try {
                 if (exception == null) {
-                    processSuccess(callStateVersion, callStartedAt);
+                    processSuccess(callPermission.stateVersion(), callStartedAt);
                 } else {
                     processException(
-                            callStateVersion,
+                            callPermission.stateVersion(),
                             callStartedAt,
                             unwrapCompletionException(exception)
                     );
@@ -149,7 +165,44 @@ public class CircuitBreaker {
         }
     }
 
-    private long acquireCallPermission() {
+    public void transitionToClosedState() {
+        transitionManually(CircuitBreakerState.CLOSED);
+    }
+
+    public void transitionToOpenState() {
+        transitionManually(CircuitBreakerState.OPEN);
+    }
+
+    public void transitionToHalfOpenState() {
+        transitionManually(CircuitBreakerState.HALF_OPEN);
+    }
+
+    public void transitionToForcedOpenState() {
+        transitionManually(CircuitBreakerState.FORCED_OPEN);
+    }
+
+    public void transitionToDisabledState() {
+        transitionManually(CircuitBreakerState.DISABLED);
+    }
+
+    public void transitionToMetricsOnlyState() {
+        transitionManually(CircuitBreakerState.METRICS_ONLY);
+    }
+
+    /**
+     * Restores the initial CLOSED state and clears all collected metrics.
+     */
+    public void reset() {
+        CircuitBreakerState previousState;
+        synchronized (stateLock) {
+            previousState = state;
+            changeState(CircuitBreakerState.CLOSED, true);
+            statisticsCollector.reset();
+        }
+        eventPublisher.publishStateTransition(previousState, CircuitBreakerState.CLOSED);
+    }
+
+    private CallPermission acquireCallPermission() {
         long callStateVersion = 0;
         CircuitBreakerState stateBeforePermission;
         CircuitBreakerState stateAfterPermission;
@@ -171,7 +224,19 @@ public class CircuitBreaker {
             eventPublisher.publishRejected(stateAfterPermission, rejection.getMessage());
             throw rejection;
         }
-        return callStateVersion;
+        return new CallPermission(callStateVersion, stateAfterPermission);
+    }
+
+    private void transitionManually(CircuitBreakerState targetState) {
+        CircuitBreakerState previousState;
+        synchronized (stateLock) {
+            previousState = state;
+            if (previousState == targetState) {
+                return;
+            }
+            changeState(targetState, targetState.resetsSlidingWindowOnManualTransition());
+        }
+        eventPublisher.publishStateTransition(previousState, targetState);
     }
 
     private void processSuccess(long callStateVersion, Instant callStartedAt) {
@@ -227,6 +292,9 @@ public class CircuitBreaker {
     }
 
     private void checkCallPermitted() {
+        if (state == CircuitBreakerState.FORCED_OPEN) {
+            throw new CallNotPermittedException("Circuit breaker is FORCED_OPEN");
+        }
         if (state == CircuitBreakerState.OPEN) {
             if (Duration.between(openStateAt, clock.instant())
                     .compareTo(config.getDurationInOpenState()) >= 0) {
@@ -260,6 +328,11 @@ public class CircuitBreaker {
             return;
         }
 
+        if (state == CircuitBreakerState.METRICS_ONLY) {
+            slidingWindow.recordSuccess(slowCall);
+            return;
+        }
+
         if (state == CircuitBreakerState.HALF_OPEN) {
             completeHalfOpenCall(false, slowCall);
         }
@@ -273,6 +346,11 @@ public class CircuitBreaker {
         if (state == CircuitBreakerState.CLOSED) {
             slidingWindow.recordFailure(slowCall);
             evaluateClosedState();
+            return;
+        }
+
+        if (state == CircuitBreakerState.METRICS_ONLY) {
+            slidingWindow.recordFailure(slowCall);
             return;
         }
 
@@ -335,23 +413,31 @@ public class CircuitBreaker {
     }
 
     private void transitionToOpen() {
-        this.state = CircuitBreakerState.OPEN;
-        this.stateVersion++;
-        this.openStateAt = clock.instant();
-        halfOpenCallTracker.reset();
+        changeState(CircuitBreakerState.OPEN, false);
     }
 
     private void transitionToHalfOpen() {
-        halfOpenCallTracker.reset();
-        this.state = CircuitBreakerState.HALF_OPEN;
-        this.stateVersion++;
+        changeState(CircuitBreakerState.HALF_OPEN, false);
     }
 
     private void transitionToClosed() {
-        this.state = CircuitBreakerState.CLOSED;
+        changeState(CircuitBreakerState.CLOSED, true);
+    }
+
+    private void changeState(CircuitBreakerState targetState, boolean resetSlidingWindow) {
+        this.state = targetState;
         this.stateVersion++;
+        this.openStateAt = targetState == CircuitBreakerState.OPEN ? clock.instant() : null;
         halfOpenCallTracker.reset();
-        this.slidingWindow.reset();
+        if (resetSlidingWindow) {
+            slidingWindow.reset();
+        }
+    }
+
+    private record CallPermission(long stateVersion, CircuitBreakerState state) {
+        private boolean ignoreResults() {
+            return !state.recordsResults();
+        }
     }
 
 }

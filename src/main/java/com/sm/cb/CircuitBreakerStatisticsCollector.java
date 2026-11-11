@@ -22,6 +22,13 @@ final class CircuitBreakerStatisticsCollector {
         rejectedCalls++;
     }
 
+    void reset() {
+        totalCalls = 0;
+        failedCalls = 0;
+        rejectedCalls = 0;
+        totalDurationNanos = 0;
+    }
+
     CircuitBreakerStatistics snapshot() {
         Duration averageDuration = totalCalls == 0
                 ? Duration.ZERO
