@@ -28,8 +28,8 @@ public final class CircuitBreakerConfig {
     private final int minimumCalls;
     private final float slowCallRateThreshold;
     private final Duration slowCallDurationThreshold;
-    private final List<Class<? extends RuntimeException>> recordedExceptionTypes;
-    private final List<Class<? extends RuntimeException>> ignoredExceptionTypes;
+    private final List<Class<? extends Throwable>> recordedExceptionTypes;
+    private final List<Class<? extends Throwable>> ignoredExceptionTypes;
 
     private CircuitBreakerConfig(Builder builder) {
         if (Float.isNaN(builder.failureRateThreshold)
@@ -151,11 +151,11 @@ public final class CircuitBreakerConfig {
         return slowCallDurationThreshold;
     }
 
-    public List<Class<? extends RuntimeException>> getRecordedExceptionTypes() {
+    public List<Class<? extends Throwable>> getRecordedExceptionTypes() {
         return recordedExceptionTypes;
     }
 
-    public List<Class<? extends RuntimeException>> getIgnoredExceptionTypes() {
+    public List<Class<? extends Throwable>> getIgnoredExceptionTypes() {
         return ignoredExceptionTypes;
     }
 
@@ -163,7 +163,7 @@ public final class CircuitBreakerConfig {
      * Returns whether the exception contributes to the failure rate.
      * Ignored types take priority over recorded types.
      */
-    public boolean shouldRecordException(RuntimeException exception) {
+    public boolean shouldRecordException(Throwable exception) {
         if (exception == null) {
             throw new IllegalArgumentException("Exception must not be null");
         }
@@ -174,9 +174,9 @@ public final class CircuitBreakerConfig {
     }
 
     private static boolean matchesExceptionType(
-            RuntimeException exception,
-            List<Class<? extends RuntimeException>> exceptionTypes) {
-        for (Class<? extends RuntimeException> exceptionType : exceptionTypes) {
+            Throwable exception,
+            List<Class<? extends Throwable>> exceptionTypes) {
+        for (Class<? extends Throwable> exceptionType : exceptionTypes) {
             if (exceptionType.isInstance(exception)) {
                 return true;
             }
@@ -184,15 +184,15 @@ public final class CircuitBreakerConfig {
         return false;
     }
 
-    private static List<Class<? extends RuntimeException>> copyExceptionTypes(
-            Class<? extends RuntimeException>[] exceptionTypes,
+    private static List<Class<? extends Throwable>> copyExceptionTypes(
+            Class<? extends Throwable>[] exceptionTypes,
             String propertyName) {
         if (exceptionTypes == null) {
             throw new IllegalArgumentException(propertyName + " must not be null");
         }
 
-        List<Class<? extends RuntimeException>> copy = new ArrayList<>(exceptionTypes.length);
-        for (Class<? extends RuntimeException> exceptionType : exceptionTypes) {
+        List<Class<? extends Throwable>> copy = new ArrayList<>(exceptionTypes.length);
+        for (Class<? extends Throwable> exceptionType : exceptionTypes) {
             if (exceptionType == null) {
                 throw new IllegalArgumentException(propertyName + " must not contain null");
             }
@@ -212,9 +212,8 @@ public final class CircuitBreakerConfig {
         private Float halfOpenFailureRateThreshold;
         private float slowCallRateThreshold = DEFAULT_SLOW_CALL_RATE_THRESHOLD;
         private Duration slowCallDurationThreshold = DEFAULT_SLOW_CALL_DURATION_THRESHOLD;
-        private List<Class<? extends RuntimeException>> recordedExceptionTypes =
-                List.of(RuntimeException.class);
-        private List<Class<? extends RuntimeException>> ignoredExceptionTypes = List.of();
+        private List<Class<? extends Throwable>> recordedExceptionTypes = List.of(Throwable.class);
+        private List<Class<? extends Throwable>> ignoredExceptionTypes = List.of();
 
         private Builder() {
         }
@@ -289,13 +288,13 @@ public final class CircuitBreakerConfig {
         }
 
         @SafeVarargs
-        public final Builder recordExceptions(Class<? extends RuntimeException>... exceptionTypes) {
+        public final Builder recordExceptions(Class<? extends Throwable>... exceptionTypes) {
             this.recordedExceptionTypes = copyExceptionTypes(exceptionTypes, "Recorded exception types");
             return this;
         }
 
         @SafeVarargs
-        public final Builder ignoreExceptions(Class<? extends RuntimeException>... exceptionTypes) {
+        public final Builder ignoreExceptions(Class<? extends Throwable>... exceptionTypes) {
             this.ignoredExceptionTypes = copyExceptionTypes(exceptionTypes, "Ignored exception types");
             return this;
         }

@@ -50,7 +50,7 @@ final class DefaultCircuitBreakerEventPublisher implements CircuitBreakerEventPu
         }
     }
 
-    void publishFailure(Duration duration, RuntimeException exception, boolean slowCall) {
+    void publishFailure(Duration duration, Throwable exception, boolean slowCall) {
         if (listeners.isEmpty()) {
             return;
         }
@@ -65,7 +65,7 @@ final class DefaultCircuitBreakerEventPublisher implements CircuitBreakerEventPu
         }
     }
 
-    void publishIgnored(Duration duration, RuntimeException exception) {
+    void publishIgnored(Duration duration, Throwable exception) {
         if (listeners.isEmpty()) {
             return;
         }

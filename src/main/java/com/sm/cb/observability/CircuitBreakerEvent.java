@@ -22,13 +22,13 @@ public sealed interface CircuitBreakerEvent {
     record CallFailed(
             Instant timestamp,
             Duration duration,
-            RuntimeException exception) implements CircuitBreakerEvent {
+            Throwable exception) implements CircuitBreakerEvent {
     }
 
     record CallIgnored(
             Instant timestamp,
             Duration duration,
-            RuntimeException exception) implements CircuitBreakerEvent {
+            Throwable exception) implements CircuitBreakerEvent {
     }
 
     record SlowCall(

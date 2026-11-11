@@ -26,7 +26,7 @@ class CircuitBreakerConfigTest {
         assertEquals(0.5f, config.getHalfOpenFailureRateThreshold());
         assertEquals(1.0f, config.getSlowCallRateThreshold());
         assertEquals(Duration.ofSeconds(60), config.getSlowCallDurationThreshold());
-        assertEquals(List.of(RuntimeException.class), config.getRecordedExceptionTypes());
+        assertEquals(List.of(Throwable.class), config.getRecordedExceptionTypes());
         assertEquals(List.of(), config.getIgnoredExceptionTypes());
     }
 

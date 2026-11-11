@@ -12,6 +12,8 @@ import com.sm.cb.window.TimeBasedSlidingWindow;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
 import java.util.function.Supplier;
 
 public class CircuitBreaker {
@@ -57,28 +59,7 @@ public class CircuitBreaker {
             throw new IllegalArgumentException("Supplier must not be null");
         }
 
-        long callStateVersion = 0;
-        CircuitBreakerState stateBeforePermission;
-        CircuitBreakerState stateAfterPermission;
-        CallNotPermittedException rejection = null;
-        synchronized (stateLock) {
-            stateBeforePermission = state;
-            try {
-                checkCallPermitted();
-                callStateVersion = stateVersion;
-            } catch (CallNotPermittedException e) {
-                statisticsCollector.recordRejectedCall();
-                rejection = e;
-            }
-            stateAfterPermission = state;
-        }
-
-        eventPublisher.publishStateTransition(stateBeforePermission, stateAfterPermission);
-        if (rejection != null) {
-            eventPublisher.publishRejected(stateAfterPermission, rejection.getMessage());
-            throw rejection;
-        }
-
+        long callStateVersion = acquireCallPermission();
         Instant callStartedAt = clock.instant();
         T response;
         try {
@@ -90,6 +71,54 @@ public class CircuitBreaker {
 
         processSuccess(callStateVersion, callStartedAt);
         return response;
+    }
+
+    public <T> CompletableFuture<T> executeAsync(
+            Supplier<? extends CompletableFuture<T>> supplier) {
+        if (supplier == null) {
+            throw new IllegalArgumentException("Supplier must not be null");
+        }
+
+        long callStateVersion;
+        try {
+            callStateVersion = acquireCallPermission();
+        } catch (CallNotPermittedException exception) {
+            return CompletableFuture.failedFuture(exception);
+        }
+
+        Instant callStartedAt = clock.instant();
+        CompletableFuture<T> sourceFuture;
+        try {
+            sourceFuture = supplier.get();
+            if (sourceFuture == null) {
+                throw new IllegalStateException("Async supplier must not return null");
+            }
+        } catch (RuntimeException exception) {
+            processException(callStateVersion, callStartedAt, exception);
+            return CompletableFuture.failedFuture(exception);
+        }
+
+        CompletableFuture<T> decoratedFuture = new CompletableFuture<>();
+        sourceFuture.whenComplete((result, exception) -> {
+            try {
+                if (exception == null) {
+                    processSuccess(callStateVersion, callStartedAt);
+                } else {
+                    processException(
+                            callStateVersion,
+                            callStartedAt,
+                            unwrapCompletionException(exception)
+                    );
+                }
+            } finally {
+                if (exception == null) {
+                    decoratedFuture.complete(result);
+                } else {
+                    decoratedFuture.completeExceptionally(exception);
+                }
+            }
+        });
+        return decoratedFuture;
     }
 
     public CircuitBreakerEventPublisher getEventPublisher() {
@@ -120,6 +149,31 @@ public class CircuitBreaker {
         }
     }
 
+    private long acquireCallPermission() {
+        long callStateVersion = 0;
+        CircuitBreakerState stateBeforePermission;
+        CircuitBreakerState stateAfterPermission;
+        CallNotPermittedException rejection = null;
+        synchronized (stateLock) {
+            stateBeforePermission = state;
+            try {
+                checkCallPermitted();
+                callStateVersion = stateVersion;
+            } catch (CallNotPermittedException exception) {
+                statisticsCollector.recordRejectedCall();
+                rejection = exception;
+            }
+            stateAfterPermission = state;
+        }
+
+        eventPublisher.publishStateTransition(stateBeforePermission, stateAfterPermission);
+        if (rejection != null) {
+            eventPublisher.publishRejected(stateAfterPermission, rejection.getMessage());
+            throw rejection;
+        }
+        return callStateVersion;
+    }
+
     private void processSuccess(long callStateVersion, Instant callStartedAt) {
         Duration callDuration = getCallDuration(callStartedAt);
         boolean slowCall = isSlowCall(callDuration);
@@ -139,7 +193,7 @@ public class CircuitBreaker {
     private void processException(
             long callStateVersion,
             Instant callStartedAt,
-            RuntimeException exception) {
+            Throwable exception) {
         Duration callDuration = getCallDuration(callStartedAt);
         boolean slowCall = isSlowCall(callDuration);
         boolean shouldRecordException = config.shouldRecordException(exception);
@@ -162,6 +216,14 @@ public class CircuitBreaker {
             eventPublisher.publishIgnored(callDuration, exception);
         }
         eventPublisher.publishStateTransition(stateBeforeCompletion, stateAfterCompletion);
+    }
+
+    private Throwable unwrapCompletionException(Throwable exception) {
+        Throwable unwrapped = exception;
+        while (unwrapped instanceof CompletionException && unwrapped.getCause() != null) {
+            unwrapped = unwrapped.getCause();
+        }
+        return unwrapped;
     }
 
     private void checkCallPermitted() {
