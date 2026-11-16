@@ -12,6 +12,7 @@
     <modules>
         <module>circuit-breaker-core</module>
         <module>demo-unstable-service</module>
+        <module>demo-protected-client</module>
     </modules>
 
     <properties>
