@@ -18,7 +18,8 @@ class PaymentController {
     @GetMapping("/{paymentId}")
     PaymentResponse getPayment(
             @PathVariable("paymentId") String paymentId,
-            @RequestParam(name = "mode", defaultValue = "RANDOM") ResponseMode mode) {
-        return simulationService.simulate(paymentId, mode);
+            @RequestParam(name = "mode", defaultValue = "RANDOM") ResponseMode mode,
+            @RequestParam(name = "delayMs", required = false) Long delayMs) {
+        return simulationService.simulate(paymentId, mode, delayMs);
     }
 }

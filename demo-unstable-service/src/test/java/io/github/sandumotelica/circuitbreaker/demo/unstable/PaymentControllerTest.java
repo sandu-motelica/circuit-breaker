@@ -7,6 +7,7 @@ import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.test.web.servlet.MockMvc;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -47,5 +48,42 @@ class PaymentControllerTest {
     void rejectsUnsupportedMode() throws Exception {
         mockMvc.perform(get("/api/payments/payment-123").param("mode", "UNKNOWN"))
                 .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void countsDeterministicRequestsAndResetsBeforeAnotherRun() throws Exception {
+        mockMvc.perform(post("/api/simulation/reset"))
+                .andExpect(status().isNoContent());
+
+        mockMvc.perform(get("/api/payments/payment-123")
+                        .param("mode", "SUCCESS")
+                        .param("delayMs", "0"))
+                .andExpect(status().isOk());
+        mockMvc.perform(get("/api/payments/payment-123")
+                        .param("mode", "FAILURE")
+                        .param("delayMs", "0"))
+                .andExpect(status().isServiceUnavailable());
+
+        mockMvc.perform(get("/api/simulation/stats"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.receivedRequests").value(2));
+
+        mockMvc.perform(post("/api/simulation/reset"))
+                .andExpect(status().isNoContent());
+        mockMvc.perform(get("/api/simulation/stats"))
+                .andExpect(jsonPath("$.receivedRequests").value(0));
+    }
+
+    @Test
+    void rejectsNegativeDelayWithoutCountingRequest() throws Exception {
+        mockMvc.perform(post("/api/simulation/reset"))
+                .andExpect(status().isNoContent());
+
+        mockMvc.perform(get("/api/payments/payment-123")
+                        .param("mode", "SUCCESS")
+                        .param("delayMs", "-1"))
+                .andExpect(status().isBadRequest());
+        mockMvc.perform(get("/api/simulation/stats"))
+                .andExpect(jsonPath("$.receivedRequests").value(0));
     }
 }
