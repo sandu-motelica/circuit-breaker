@@ -1,0 +1,5 @@
+phase,count,intervalMs,modes,delaysMs,pauseBeforeMs
+healthy,8,50,SUCCESS,20,0
+degraded,8,50,SUCCESS|FAILURE,20,0
+outage,20,50,FAILURE,20,0
+recovery,8,100,SUCCESS,20,6000

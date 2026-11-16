@@ -1,0 +1,3 @@
+phase,count,intervalMs,modes,delaysMs,pauseBeforeMs
+healthy,8,50,SUCCESS,20,0
+slow,8,1600,SUCCESS,1500,0

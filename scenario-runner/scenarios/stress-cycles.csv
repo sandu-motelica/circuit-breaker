@@ -1,0 +1,18 @@
+phase,count,intervalMs,modes,delaysMs,pauseBeforeMs
+# Start with a healthy, moderately busy service.
+warmup,120,20,SUCCESS,20,0
+# Slow successful calls open the circuit through the slow-call threshold.
+slow-degradation,12,150,SUCCESS,1200,300
+slow-open-load,250,10,SUCCESS,20,1000
+# Wait longer than the configured 5-second open period, then recover.
+slow-recovery-probes,2,300,SUCCESS,20,7000
+healthy-under-load,150,10,SUCCESS,20,100
+# A new failure wave opens the circuit again.
+failure-wave,8,150,FAILURE,20,200
+failure-open-load,300,5,FAILURE,20,200
+# Failed half-open probes should send the circuit back to OPEN.
+failed-half-open-probes,2,300,FAILURE,20,7000
+second-open-load,200,5,FAILURE,20,200
+# Successful probes close the circuit; finish with healthy traffic.
+final-recovery-probes,2,300,SUCCESS,20,7000
+final-healthy-load,120,10,SUCCESS,20,100
