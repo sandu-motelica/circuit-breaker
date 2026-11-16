@@ -18,6 +18,18 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.function.Supplier;
 
+/**
+ * Protects synchronous and asynchronous operations from repeatedly calling an
+ * unhealthy dependency.
+ *
+ * <p>The breaker records failures and slow calls in a sliding window. Once a
+ * configured threshold is reached, it transitions from {@link CircuitBreakerState#CLOSED}
+ * to {@link CircuitBreakerState#OPEN} and rejects new calls. After the configured
+ * open-state duration, a limited number of probe calls are admitted in
+ * {@link CircuitBreakerState#HALF_OPEN}.</p>
+ *
+ * <p>Instances are thread-safe.</p>
+ */
 public final class CircuitBreaker {
     private final Clock clock;
     private final CircuitBreakerConfig config;
@@ -31,10 +43,26 @@ public final class CircuitBreaker {
     private final CircuitBreakerStatisticsCollector statisticsCollector;
     private final DefaultCircuitBreakerEventPublisher eventPublisher;
 
+    /**
+     * Creates a circuit breaker using the system UTC clock.
+     *
+     * @param config configuration used for all state transitions and metrics
+     * @throws IllegalArgumentException if {@code config} is {@code null}
+     */
     public CircuitBreaker(CircuitBreakerConfig config) {
         this(config, Clock.systemUTC());
     }
 
+    /**
+     * Creates a circuit breaker using the supplied clock.
+     *
+     * <p>A custom clock is useful when call durations and state transitions must
+     * use an application-specific time source.</p>
+     *
+     * @param config configuration used for all state transitions and metrics
+     * @param clock time source used to measure calls and open-state duration
+     * @throws IllegalArgumentException if {@code config} or {@code clock} is {@code null}
+     */
     public CircuitBreaker(CircuitBreakerConfig config, Clock clock) {
         if (config == null) {
             throw new IllegalArgumentException("Undefined circuit breaker config");
@@ -56,6 +84,16 @@ public final class CircuitBreaker {
         this.eventPublisher = new DefaultCircuitBreakerEventPublisher(clock);
     }
 
+    /**
+     * Executes an operation under circuit-breaker protection.
+     *
+     * @param supplier operation to execute
+     * @param <T> result type
+     * @return the operation result
+     * @throws CallNotPermittedException if the current state rejects the call
+     * @throws IllegalArgumentException if {@code supplier} is {@code null}
+     * @throws RuntimeException if the operation throws one
+     */
     public <T> T execute(Supplier<T> supplier) {
         if (supplier == null) {
             throw new IllegalArgumentException("Supplier must not be null");
@@ -79,6 +117,18 @@ public final class CircuitBreaker {
         return response;
     }
 
+    /**
+     * Starts an asynchronous operation under circuit-breaker protection and
+     * records its outcome when the returned future completes.
+     *
+     * <p>Rejections and exceptions thrown while obtaining the source future are
+     * represented by an exceptionally completed future.</p>
+     *
+     * @param supplier operation that starts and returns the asynchronous computation
+     * @param <T> result type
+     * @return a future completed with the operation result or exception
+     * @throws IllegalArgumentException if {@code supplier} is {@code null}
+     */
     public <T> CompletableFuture<T> executeAsync(
             Supplier<? extends CompletableFuture<T>> supplier) {
         if (supplier == null) {
@@ -138,60 +188,109 @@ public final class CircuitBreaker {
         return decoratedFuture;
     }
 
+    /**
+     * Returns the publisher used to subscribe to circuit-breaker events.
+     *
+     * @return this breaker's event publisher
+     */
     public CircuitBreakerEventPublisher getEventPublisher() {
         return eventPublisher;
     }
 
+    /**
+     * Returns a snapshot of cumulative call statistics collected since creation
+     * or the latest {@link #reset()}.
+     *
+     * @return an immutable statistics snapshot
+     */
     public CircuitBreakerStatistics getStatistics() {
         synchronized (stateLock) {
             return statisticsCollector.snapshot();
         }
     }
 
+    /**
+     * Returns the current circuit-breaker state.
+     *
+     * @return current state
+     */
     public CircuitBreakerState getState() {
         synchronized (stateLock) {
             return state;
         }
     }
 
+    /**
+     * Returns the failure rate in the main sliding window.
+     *
+     * @return a value from {@code 0.0} to {@code 1.0}
+     */
     public float getFailureRate() {
         synchronized (stateLock) {
             return slidingWindow.getFailureRate();
         }
     }
 
+    /**
+     * Returns the slow-call rate in the main sliding window.
+     *
+     * @return a value from {@code 0.0} to {@code 1.0}
+     */
     public float getSlowCallRate() {
         synchronized (stateLock) {
             return slidingWindow.getSlowCallRate();
         }
     }
 
+    /**
+     * Manually transitions to {@link CircuitBreakerState#CLOSED} and clears the
+     * sliding-window metrics.
+     */
     public void transitionToClosedState() {
         transitionManually(CircuitBreakerState.CLOSED);
     }
 
+    /**
+     * Manually transitions to {@link CircuitBreakerState#OPEN}.
+     */
     public void transitionToOpenState() {
         transitionManually(CircuitBreakerState.OPEN);
     }
 
+    /**
+     * Manually transitions to {@link CircuitBreakerState#HALF_OPEN}.
+     */
     public void transitionToHalfOpenState() {
         transitionManually(CircuitBreakerState.HALF_OPEN);
     }
 
+    /**
+     * Manually transitions to {@link CircuitBreakerState#FORCED_OPEN}, causing
+     * every call to be rejected until another manual transition occurs.
+     */
     public void transitionToForcedOpenState() {
         transitionManually(CircuitBreakerState.FORCED_OPEN);
     }
 
+    /**
+     * Manually transitions to {@link CircuitBreakerState#DISABLED}, allowing all
+     * calls through without recording their results.
+     */
     public void transitionToDisabledState() {
         transitionManually(CircuitBreakerState.DISABLED);
     }
 
+    /**
+     * Manually transitions to {@link CircuitBreakerState#METRICS_ONLY}, allowing
+     * all calls while continuing to record their results.
+     */
     public void transitionToMetricsOnlyState() {
         transitionManually(CircuitBreakerState.METRICS_ONLY);
     }
 
     /**
-     * Restores the initial CLOSED state and clears all collected metrics.
+     * Restores the initial {@link CircuitBreakerState#CLOSED} state and clears
+     * sliding-window metrics, half-open probes, and cumulative statistics.
      */
     public void reset() {
         CircuitBreakerState previousState;
