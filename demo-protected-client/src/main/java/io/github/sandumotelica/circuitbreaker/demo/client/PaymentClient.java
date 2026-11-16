@@ -15,11 +15,15 @@ class PaymentClient {
         this.restClient = restClientBuilder.baseUrl(properties.upstreamBaseUrl()).build();
     }
 
-    PaymentResponse getPayment(String paymentId, ResponseMode mode) {
+    PaymentResponse getPayment(String paymentId, ResponseMode mode, Long delayMs) {
         return circuitBreaker.execute(() -> restClient.get()
-                .uri(uriBuilder -> uriBuilder.path("/api/payments/{paymentId}")
-                        .queryParam("mode", mode.name())
-                        .build(paymentId))
+                .uri(uriBuilder -> {
+                    uriBuilder.path("/api/payments/{paymentId}").queryParam("mode", mode.name());
+                    if (delayMs != null) {
+                        uriBuilder.queryParam("delayMs", delayMs);
+                    }
+                    return uriBuilder.build(paymentId);
+                })
                 .retrieve()
                 .body(PaymentResponse.class));
     }

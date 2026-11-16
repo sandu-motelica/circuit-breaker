@@ -23,6 +23,7 @@ Try the client endpoint:
 ```sh
 curl "http://localhost:8080/api/payments/payment-123?mode=SUCCESS"
 curl "http://localhost:8080/api/payments/payment-123?mode=FAILURE"
+curl "http://localhost:8080/api/payments/payment-123?mode=SUCCESS&delayMs=20"
 curl "http://localhost:8080/api/circuit-breaker"
 ```
 
@@ -32,12 +33,27 @@ so each behavior can be reproduced. An upstream failure returns HTTP 502 with
 `UPSTREAM_FAILURE`; a call blocked by the circuit breaker returns HTTP 503 with
 `CIRCUIT_OPEN` and never reaches the upstream service.
 
+For repeatable scenarios, choose `mode=SUCCESS` or `mode=FAILURE` and add a
+non-negative `delayMs`. The client forwards both values to the upstream service.
+Omitting `delayMs` keeps the upstream service's original timing behavior.
+
 By default, two failures or two slow calls among four measured calls open the
 circuit. After five seconds, two half-open probe calls can run. Their outcomes
 decide whether the circuit closes or opens again. The status endpoint exposes
 the current state, failure and slow-call rates, cumulative call counts, and
 average duration in milliseconds. Rates describe the main sliding window; the
 counters are cumulative.
+
+After all calls from a scenario have finished, reset the circuit before the
+next run:
+
+```sh
+curl -X POST "http://localhost:8080/api/circuit-breaker/reset"
+```
+
+This returns HTTP 204 and clears the state, sliding window, and statistics.
+Reset the upstream service separately through its `/api/simulation/reset`
+endpoint.
 
 The upstream URL, circuit-breaker thresholds, and HTTP timeouts are configured
 in `src/main/resources/application.yml`. For example, set the environment
