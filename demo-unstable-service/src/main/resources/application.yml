@@ -1,0 +1,8 @@
+server:
+  port: 8081
+
+demo:
+  unstable:
+    failure-probability: 0.4
+    slow-probability: 0.3
+    slow-delay: 1500ms
