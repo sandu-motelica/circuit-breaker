@@ -13,6 +13,7 @@
         <module>circuit-breaker-core</module>
         <module>demo-unstable-service</module>
         <module>demo-protected-client</module>
+        <module>scenario-runner</module>
     </modules>
 
     <properties>

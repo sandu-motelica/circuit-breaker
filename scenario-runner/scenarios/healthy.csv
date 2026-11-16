@@ -1,0 +1,2 @@
+phase,count,intervalMs,modes,delaysMs,pauseBeforeMs
+healthy,20,50,SUCCESS,20,0
