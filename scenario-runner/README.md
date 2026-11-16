@@ -60,3 +60,19 @@ The request plan is repeatable. Scheduling, network timing, and circuit state
 can vary when multiple threads are used. Start with one thread for behavior
 checks, then use several threads for load experiments. The `startedMs` column
 shows scheduling delay relative to `scheduledMs`.
+
+For a longer run, use `scenarios/stress-cycles.csv` with 8 threads. It plans
+1,166 requests across healthy traffic, slow calls, two failure periods, open
+circuit load, failed half-open probes, and two recoveries. Its three 7-second
+pauses are intentionally longer than the protected client's default 5-second
+open period. It is designed for the demo settings in
+`demo-protected-client/src/main/resources/application.yml`.
+
+```sh
+java -jar scenario-runner/target/scenario-runner-0.1.0-SNAPSHOT-all.jar \
+  scenario-runner/scenarios/stress-cycles.csv scenario-runner/results/stress-cycles 8
+```
+
+Check `summary.json` by phase and `calls.csv` for scheduling drift. With 8
+threads, timing and the exact number of rejected calls can change between runs;
+the input plan remains identical.
