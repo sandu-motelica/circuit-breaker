@@ -1,6 +1,7 @@
 # Protected HTTP client
 
-A Spring Boot client that calls `demo-unstable-service` through `circuit-breaker-core`.
+A Spring Boot client that calls `demo-unstable-service` through either
+`circuit-breaker-core` or Resilience4j. Each route has an independent circuit breaker.
 It runs independently on port `8080`; the upstream service runs on port `8081`.
 
 Build both applications from the repository root:
@@ -25,6 +26,9 @@ curl "http://localhost:8080/api/payments/payment-123?mode=SUCCESS"
 curl "http://localhost:8080/api/payments/payment-123?mode=FAILURE"
 curl "http://localhost:8080/api/payments/payment-123?mode=SUCCESS&delayMs=20"
 curl "http://localhost:8080/api/circuit-breaker"
+curl "http://localhost:8080/api/payments/resilience4j/payment-123?mode=SUCCESS"
+curl "http://localhost:8080/api/payments/resilience4j/payment-123?mode=FAILURE"
+curl "http://localhost:8080/api/resilience4j/circuit-breaker"
 ```
 
 The `mode` parameter is optional and defaults to `RANDOM`. Its other values are
@@ -36,6 +40,7 @@ so each behavior can be reproduced. An upstream failure returns HTTP 502 with
 For repeatable scenarios, choose `mode=SUCCESS` or `mode=FAILURE` and add a
 non-negative `delayMs`. The client forwards both values to the upstream service.
 Omitting `delayMs` keeps the upstream service's original timing behavior.
+Both payment routes use the same upstream HTTP client and accept the same parameters.
 
 By default, two failures or two slow calls among four measured calls open the
 circuit. After five seconds, two half-open probe calls can run. Their outcomes
@@ -49,9 +54,14 @@ next run:
 
 ```sh
 curl -X POST "http://localhost:8080/api/circuit-breaker/reset"
+curl -X POST "http://localhost:8080/api/resilience4j/circuit-breaker/reset"
 ```
 
-This returns HTTP 204 and clears the state, sliding window, and statistics.
+Each reset returns HTTP 204 and affects only its own circuit. The Resilience4j
+status reports native library metrics: rates are percentages (`-1` before enough
+calls), `bufferedCalls` and `failedCalls` describe the current sliding window,
+and `notPermittedCalls` counts rejections since reset. The custom status uses
+fractional rates and cumulative call counts.
 Reset the upstream service separately through its `/api/simulation/reset`
 endpoint.
 
