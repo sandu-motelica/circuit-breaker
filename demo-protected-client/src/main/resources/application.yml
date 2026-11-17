@@ -10,6 +10,7 @@ spring:
 demo:
   client:
     upstream-base-url: http://localhost:8081
+    sliding-window-type: COUNT_BASED
     sliding-window-size: 4
     minimum-calls: 4
     failure-rate-threshold: 0.5

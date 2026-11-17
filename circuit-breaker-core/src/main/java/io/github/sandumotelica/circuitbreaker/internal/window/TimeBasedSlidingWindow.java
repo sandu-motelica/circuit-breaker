@@ -52,7 +52,38 @@ public class TimeBasedSlidingWindow implements SlidingWindow {
     }
 
     @Override
+    public SlidingWindowMetrics recordAndGetMetricsLocked(boolean failure, boolean slow) {
+        assert Thread.holdsLock(this);
+        record(failure, slow);
+        return metrics();
+    }
+
+    @Override
+    public boolean recordAndCheckThresholdLocked(boolean failure, boolean slow,
+            int minimumCalls, float failureRateThreshold, float slowCallRateThreshold) {
+        assert Thread.holdsLock(this);
+        record(failure, slow);
+        long nowSecond = currentSecond();
+        int totalFailures = 0;
+        int totalSlowCalls = 0;
+        int totalCalls = 0;
+        for (SecondBucket bucket : buckets) {
+            if (bucket.second >= 0 && bucket.second > nowSecond - windowSizeInSeconds) {
+                totalFailures += bucket.failureCount;
+                totalSlowCalls += bucket.slowCallCount;
+                totalCalls += bucket.totalCalls;
+            }
+        }
+        return SlidingWindowMetrics.exceedsThreshold(totalCalls, totalFailures, totalSlowCalls,
+                minimumCalls, failureRateThreshold, slowCallRateThreshold);
+    }
+
+    @Override
     public synchronized SlidingWindowMetrics getMetrics() {
+        return metrics();
+    }
+
+    private SlidingWindowMetrics metrics() {
         long nowSecond = currentSecond();
         int totalFailures = 0;
         int totalSlowCalls = 0;
@@ -100,6 +131,12 @@ public class TimeBasedSlidingWindow implements SlidingWindow {
     }
 
     private long currentSecond() {
-        return clock.instant().getEpochSecond();
+        try {
+            // floorDiv preserves the epoch second for times before 1970.
+            return Math.floorDiv(clock.millis(), 1_000L);
+        } catch (ArithmeticException outOfMillisRange) {
+            // An Instant can be valid even when its epoch milliseconds overflow.
+            return clock.instant().getEpochSecond();
+        }
     }
 }

@@ -1,5 +1,7 @@
 package io.github.sandumotelica.circuitbreaker.internal;
 
+import java.util.concurrent.atomic.AtomicLong;
+
 public final class HalfOpenCallTracker {
     public enum AdmissionResult {
         ACCEPTED,
@@ -7,27 +9,31 @@ public final class HalfOpenCallTracker {
         CONCURRENT_LIMIT_REACHED
     }
 
-    private int acceptedCalls;
-    private int activeCalls;
+    private final AtomicLong acceptedAndActive = new AtomicLong();
     private int completedCalls;
     private int failureCount;
     private int slowCallCount;
 
     public AdmissionResult tryAcquire(int totalCallLimit, int concurrentCallLimit) {
-        if (acceptedCalls >= totalCallLimit) {
-            return AdmissionResult.TOTAL_LIMIT_REACHED;
+        while (true) {
+            long current = acceptedAndActive.get();
+            int accepted = (int) (current >>> 32);
+            int active = (int) current;
+            if (accepted >= totalCallLimit) {
+                return AdmissionResult.TOTAL_LIMIT_REACHED;
+            }
+            if (active >= concurrentCallLimit) {
+                return AdmissionResult.CONCURRENT_LIMIT_REACHED;
+            }
+            long updated = ((long) (accepted + 1) << 32) | ((active + 1) & 0xffffffffL);
+            if (acceptedAndActive.compareAndSet(current, updated)) {
+                return AdmissionResult.ACCEPTED;
+            }
         }
-        if (activeCalls >= concurrentCallLimit) {
-            return AdmissionResult.CONCURRENT_LIMIT_REACHED;
-        }
-
-        acceptedCalls++;
-        activeCalls++;
-        return AdmissionResult.ACCEPTED;
     }
 
     public void recordCompletion(boolean failure, boolean slowCall) {
-        activeCalls--;
+        release(false);
         completedCalls++;
 
         if (failure) {
@@ -39,8 +45,7 @@ public final class HalfOpenCallTracker {
     }
 
     public void recordIgnoredCall() {
-        acceptedCalls--;
-        activeCalls--;
+        release(true);
     }
 
     public boolean hasCompleted(int requiredCalls) {
@@ -63,12 +68,17 @@ public final class HalfOpenCallTracker {
         return rateOf(slowCallCount);
     }
 
-    public void reset() {
-        acceptedCalls = 0;
-        activeCalls = 0;
-        completedCalls = 0;
-        failureCount = 0;
-        slowCallCount = 0;
+    private void release(boolean ignored) {
+        while (true) {
+            long current = acceptedAndActive.get();
+            int accepted = (int) (current >>> 32);
+            int active = (int) current;
+            long updated = ((long) (accepted - (ignored ? 1 : 0)) << 32)
+                    | ((active - 1) & 0xffffffffL);
+            if (acceptedAndActive.compareAndSet(current, updated)) {
+                return;
+            }
+        }
     }
 
     private float rateOf(int calls) {

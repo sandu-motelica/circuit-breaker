@@ -1,6 +1,59 @@
 # Custom circuit breaker vs Resilience4j
 
-## Result
+## Earlier HTTP check on this branch
+
+The HTTP results below were recorded on an earlier revision of this branch.
+They are dated measurements, separate from the current JMH results.
+
+### Count window
+
+On `performance/reduce-breaker-contention`, the existing `stress-cycles.csv`
+plan was run twice through each route with eight runner threads. It includes
+healthy calls, slow calls, failure waves, OPEN rejections, failed HALF_OPEN
+probes, and recovery. The first pair ran custom before Resilience4j; the second
+reversed the order. Each run reset its breaker and the upstream counter.
+
+| Pair and order | Route | Success | Upstream failure | Rejected | Mean HTTP latency | p95 |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| 1, custom first | Custom | 403 | 4 | 759 | 26.93 ms | 44 ms |
+| 1, Resilience4j second | Resilience4j | 403 | 4 | 759 | 21.16 ms | 33 ms |
+| 2, Resilience4j first | Resilience4j | 403 | 4 | 759 | 21.42 ms | 33 ms |
+| 2, custom second | Custom | 403 | 4 | 759 | 21.30 ms | 33 ms |
+
+Each run planned 1,166 requests, reached the upstream 407 times, had no
+unexpected or transport responses, and ended CLOSED. The first custom run had
+a 61.14 ms mean in its initial warmup phase, versus about 32 ms for the other
+three runs; its overall latency gap is therefore confounded by startup and
+order. In the second pair, the two routes were close. Two pairs are too few to
+claim an end-to-end speed advantage. The per-call CSVs and summaries are in
+`scenario-runner/results/performance-mixed-2026-11-17/` locally (ignored by Git).
+
+### Time window
+
+The protected client was restarted with
+`--demo.client.sliding-window-type=TIME_BASED` for both breakers. The
+[`time-window-mixed.csv`](../../scenario-runner/scenarios/time-window-mixed.csv)
+plan allows the slow calls to complete before the next load phase, then covers
+OPEN rejections, recovery probes, a failure wave, and another recovery. It was
+run twice per route with eight runner threads, reversing route order in the
+second pair.
+
+| Pair and order | Route | Success | Upstream failure | Rejected | Mean HTTP latency | p95 |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| 1, custom first | Custom | 30 | 4 | 82 | 73.72 ms | 1,205 ms |
+| 1, Resilience4j second | Resilience4j | 30 | 4 | 82 | 73.08 ms | 1,205 ms |
+| 2, Resilience4j first | Resilience4j | 30 | 4 | 82 | 74.19 ms | 1,210 ms |
+| 2, custom second | Custom | 30 | 4 | 82 | 74.35 ms | 1,210 ms |
+
+Each run planned 116 requests, reached the upstream 34 times, had no
+unexpected or transport responses, and ended CLOSED. Both breakers made the
+same admission decisions in every phase. The latency includes six 1.2-second
+upstream calls, HTTP, and scheduling; differences below 1 ms in these pairs
+do not establish an end-to-end speed advantage. Raw output is in the same
+ignored results directory under `time-targeted-pair-2/` and
+`time-targeted-pair-3/`.
+
+## Earlier repeated comparison
 
 Across the four supplied scenarios, **both implementations returned the same
 number of successes, upstream failures, and rejected calls in every run**. Their

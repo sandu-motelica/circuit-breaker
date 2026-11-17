@@ -10,6 +10,7 @@ class CircuitBreakerConfiguration {
     @Bean
     CircuitBreaker paymentCircuitBreaker(ProtectedClientProperties properties) {
         CircuitBreakerConfig config = CircuitBreakerConfig.builder()
+                .slidingWindowType(properties.slidingWindowType())
                 .slidingWindowSize(properties.slidingWindowSize())
                 .minimumCalls(properties.minimumCalls())
                 .failureRateThreshold(properties.failureRateThreshold())

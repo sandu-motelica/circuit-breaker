@@ -7,7 +7,6 @@ import io.github.sandumotelica.circuitbreaker.internal.DefaultCircuitBreakerEven
 import io.github.sandumotelica.circuitbreaker.internal.HalfOpenCallTracker;
 import io.github.sandumotelica.circuitbreaker.internal.window.CountBasedSlidingWindow;
 import io.github.sandumotelica.circuitbreaker.internal.window.SlidingWindow;
-import io.github.sandumotelica.circuitbreaker.internal.window.SlidingWindowMetrics;
 import io.github.sandumotelica.circuitbreaker.internal.window.TimeBasedSlidingWindow;
 
 import java.time.Clock;
@@ -33,14 +32,14 @@ import java.util.function.Supplier;
 public final class CircuitBreaker {
     private final Clock clock;
     private final CircuitBreakerConfig config;
-    private final Object stateLock = new Object();
     private Instant openStateAt;
 
     private CircuitBreakerState state;
     private long stateVersion;
+    private volatile CallPermission admissionState;
     private final SlidingWindow slidingWindow;
-    private final HalfOpenCallTracker halfOpenCallTracker;
-    private final CircuitBreakerStatisticsCollector statisticsCollector;
+    private HalfOpenCallTracker halfOpenCallTracker;
+    private volatile CircuitBreakerStatisticsCollector statisticsCollector;
     private final DefaultCircuitBreakerEventPublisher eventPublisher;
 
     /**
@@ -60,7 +59,7 @@ public final class CircuitBreaker {
      * use an application-specific time source.</p>
      *
      * @param config configuration used for all state transitions and metrics
-     * @param clock time source used to measure calls and open-state duration
+     * @param clock  time source used to measure calls and open-state duration
      * @throws IllegalArgumentException if {@code config} or {@code clock} is {@code null}
      */
     public CircuitBreaker(CircuitBreakerConfig config, Clock clock) {
@@ -73,13 +72,14 @@ public final class CircuitBreaker {
         this.config = config;
         this.state = CircuitBreakerState.CLOSED;
         this.stateVersion = 0;
+        this.halfOpenCallTracker = new HalfOpenCallTracker();
+        this.admissionState = new CallPermission(0, CircuitBreakerState.CLOSED, halfOpenCallTracker);
         if (config.getSlidingWindowType() == SlidingWindowType.COUNT_BASED) {
             this.slidingWindow = new CountBasedSlidingWindow(config.getSlidingWindowSize());
         } else {
             this.slidingWindow = new TimeBasedSlidingWindow(config.getSlidingWindowSize(), clock);
         }
         this.clock = clock;
-        this.halfOpenCallTracker = new HalfOpenCallTracker();
         this.statisticsCollector = new CircuitBreakerStatisticsCollector();
         this.eventPublisher = new DefaultCircuitBreakerEventPublisher(clock);
     }
@@ -88,11 +88,11 @@ public final class CircuitBreaker {
      * Executes an operation under circuit-breaker protection.
      *
      * @param supplier operation to execute
-     * @param <T> result type
+     * @param <T>      result type
      * @return the operation result
      * @throws CallNotPermittedException if the current state rejects the call
-     * @throws IllegalArgumentException if {@code supplier} is {@code null}
-     * @throws RuntimeException if the operation throws one
+     * @throws IllegalArgumentException  if {@code supplier} is {@code null}
+     * @throws RuntimeException          if the operation throws one
      */
     public <T> T execute(Supplier<T> supplier) {
         if (supplier == null) {
@@ -105,15 +105,17 @@ public final class CircuitBreaker {
         }
 
         Instant callStartedAt = clock.instant();
+        long startSecond = callStartedAt.getEpochSecond();
+        int startNano = callStartedAt.getNano();
         T response;
         try {
             response = supplier.get();
         } catch (RuntimeException e) {
-            processException(callPermission.stateVersion(), callStartedAt, e);
+            processException(callPermission.stateVersion(), startSecond, startNano, e);
             throw e;
         }
 
-        processSuccess(callPermission.stateVersion(), callStartedAt);
+        processSuccess(callPermission.stateVersion(), startSecond, startNano);
         return response;
     }
 
@@ -125,7 +127,7 @@ public final class CircuitBreaker {
      * represented by an exceptionally completed future.</p>
      *
      * @param supplier operation that starts and returns the asynchronous computation
-     * @param <T> result type
+     * @param <T>      result type
      * @return a future completed with the operation result or exception
      * @throws IllegalArgumentException if {@code supplier} is {@code null}
      */
@@ -154,6 +156,8 @@ public final class CircuitBreaker {
         }
 
         Instant callStartedAt = clock.instant();
+        long startSecond = callStartedAt.getEpochSecond();
+        int startNano = callStartedAt.getNano();
         CompletableFuture<T> sourceFuture;
         try {
             sourceFuture = supplier.get();
@@ -161,7 +165,7 @@ public final class CircuitBreaker {
                 throw new IllegalStateException("Async supplier must not return null");
             }
         } catch (RuntimeException exception) {
-            processException(callPermission.stateVersion(), callStartedAt, exception);
+            processException(callPermission.stateVersion(), startSecond, startNano, exception);
             return CompletableFuture.failedFuture(exception);
         }
 
@@ -169,11 +173,12 @@ public final class CircuitBreaker {
         sourceFuture.whenComplete((result, exception) -> {
             try {
                 if (exception == null) {
-                    processSuccess(callPermission.stateVersion(), callStartedAt);
+                    processSuccess(callPermission.stateVersion(), startSecond, startNano);
                 } else {
                     processException(
                             callPermission.stateVersion(),
-                            callStartedAt,
+                            startSecond,
+                            startNano,
                             unwrapCompletionException(exception)
                     );
                 }
@@ -200,13 +205,13 @@ public final class CircuitBreaker {
     /**
      * Returns a snapshot of cumulative call statistics collected since creation
      * or the latest {@link #reset()}.
+     * During concurrent updates, individual counters may reflect slightly
+     * different instants. Once updates finish, the snapshot is exact.
      *
      * @return an immutable statistics snapshot
      */
     public CircuitBreakerStatistics getStatistics() {
-        synchronized (stateLock) {
-            return statisticsCollector.snapshot();
-        }
+        return statisticsCollector.snapshot();
     }
 
     /**
@@ -215,9 +220,7 @@ public final class CircuitBreaker {
      * @return current state
      */
     public CircuitBreakerState getState() {
-        synchronized (stateLock) {
-            return state;
-        }
+        return admissionState.state();
     }
 
     /**
@@ -226,9 +229,7 @@ public final class CircuitBreaker {
      * @return a value from {@code 0.0} to {@code 1.0}
      */
     public float getFailureRate() {
-        synchronized (stateLock) {
-            return slidingWindow.getFailureRate();
-        }
+        return slidingWindow.getFailureRate();
     }
 
     /**
@@ -237,9 +238,7 @@ public final class CircuitBreaker {
      * @return a value from {@code 0.0} to {@code 1.0}
      */
     public float getSlowCallRate() {
-        synchronized (stateLock) {
-            return slidingWindow.getSlowCallRate();
-        }
+        return slidingWindow.getSlowCallRate();
     }
 
     /**
@@ -294,20 +293,51 @@ public final class CircuitBreaker {
      */
     public void reset() {
         CircuitBreakerState previousState;
-        synchronized (stateLock) {
+        synchronized (slidingWindow) {
             previousState = state;
+            statisticsCollector = new CircuitBreakerStatisticsCollector();
             changeState(CircuitBreakerState.CLOSED, true);
-            statisticsCollector.reset();
         }
         eventPublisher.publishStateTransition(previousState, CircuitBreakerState.CLOSED);
     }
 
     private CallPermission acquireCallPermission() {
+        while (true) {
+            CallPermission current = admissionState;
+            if (current.state() == CircuitBreakerState.CLOSED
+                    || current.state() == CircuitBreakerState.METRICS_ONLY
+                    || current.state() == CircuitBreakerState.DISABLED) {
+                return current;
+            }
+            if (current.state() != CircuitBreakerState.HALF_OPEN) {
+                break;
+            }
+
+            HalfOpenCallTracker.AdmissionResult admission = current.tracker().tryAcquire(
+                    config.getPermittedCallsInHalfOpen(),
+                    config.getMaxConcurrentCallsInHalfOpen()
+            );
+            if (admissionState != current) {
+                // A transition detached this tracker. Retry against the new state.
+                continue;
+            }
+            if (admission == HalfOpenCallTracker.AdmissionResult.ACCEPTED) {
+                return current;
+            }
+            String reason = admission == HalfOpenCallTracker.AdmissionResult.TOTAL_LIMIT_REACHED
+                    ? "Too many calls in HALF_OPEN"
+                    : "Too many concurrent calls in HALF_OPEN";
+            CallNotPermittedException rejection = new CallNotPermittedException(reason);
+            statisticsCollector.recordRejectedCall();
+            eventPublisher.publishRejected(CircuitBreakerState.HALF_OPEN, reason);
+            throw rejection;
+        }
+
         long callStateVersion = 0;
         CircuitBreakerState stateBeforePermission;
         CircuitBreakerState stateAfterPermission;
         CallNotPermittedException rejection = null;
-        synchronized (stateLock) {
+        synchronized (slidingWindow) {
             stateBeforePermission = state;
             try {
                 checkCallPermitted();
@@ -324,12 +354,12 @@ public final class CircuitBreaker {
             eventPublisher.publishRejected(stateAfterPermission, rejection.getMessage());
             throw rejection;
         }
-        return new CallPermission(callStateVersion, stateAfterPermission);
+        return new CallPermission(callStateVersion, stateAfterPermission, halfOpenCallTracker);
     }
 
     private void transitionManually(CircuitBreakerState targetState) {
         CircuitBreakerState previousState;
-        synchronized (stateLock) {
+        synchronized (slidingWindow) {
             previousState = state;
             if (previousState == targetState) {
                 return;
@@ -339,13 +369,20 @@ public final class CircuitBreaker {
         eventPublisher.publishStateTransition(previousState, targetState);
     }
 
-    private void processSuccess(long callStateVersion, Instant callStartedAt) {
-        Duration callDuration = getCallDuration(callStartedAt);
+    private void processSuccess(long callStateVersion, long startSecond, int startNano) {
+        Duration callDuration = getCallDuration(startSecond, startNano);
         boolean slowCall = isSlowCall(callDuration);
+        statisticsCollector.recordCall(callDuration, false);
+        CallPermission current = admissionState;
+        if (!slowCall && current.stateVersion() == callStateVersion
+                && current.state() == CircuitBreakerState.CLOSED
+                && slidingWindow.tryRecordHealthySuccess()) {
+            eventPublisher.publishSuccess(callDuration, false);
+            return;
+        }
         CircuitBreakerState stateBeforeCompletion;
         CircuitBreakerState stateAfterCompletion;
-        synchronized (stateLock) {
-            statisticsCollector.recordCall(callDuration, false);
+        synchronized (slidingWindow) {
             stateBeforeCompletion = state;
             onSuccess(callStateVersion, slowCall);
             stateAfterCompletion = state;
@@ -357,15 +394,16 @@ public final class CircuitBreaker {
 
     private void processException(
             long callStateVersion,
-            Instant callStartedAt,
+            long startSecond,
+            int startNano,
             Throwable exception) {
-        Duration callDuration = getCallDuration(callStartedAt);
+        Duration callDuration = getCallDuration(startSecond, startNano);
         boolean slowCall = isSlowCall(callDuration);
         boolean shouldRecordException = config.shouldRecordException(exception);
+        statisticsCollector.recordCall(callDuration, shouldRecordException);
         CircuitBreakerState stateBeforeCompletion;
         CircuitBreakerState stateAfterCompletion;
-        synchronized (stateLock) {
-            statisticsCollector.recordCall(callDuration, shouldRecordException);
+        synchronized (slidingWindow) {
             stateBeforeCompletion = state;
             if (shouldRecordException) {
                 onFailure(callStateVersion, slowCall);
@@ -423,8 +461,11 @@ public final class CircuitBreaker {
         }
 
         if (state == CircuitBreakerState.CLOSED) {
-            slidingWindow.recordSuccess(slowCall);
-            evaluateClosedState();
+            if (slidingWindow.recordAndCheckThresholdLocked(false, slowCall,
+                    config.getMinimumCalls(), config.getFailureRateThreshold(),
+                    config.getSlowCallRateThreshold())) {
+                transitionToOpen();
+            }
             return;
         }
 
@@ -444,8 +485,11 @@ public final class CircuitBreaker {
         }
 
         if (state == CircuitBreakerState.CLOSED) {
-            slidingWindow.recordFailure(slowCall);
-            evaluateClosedState();
+            if (slidingWindow.recordAndCheckThresholdLocked(true, slowCall,
+                    config.getMinimumCalls(), config.getFailureRateThreshold(),
+                    config.getSlowCallRateThreshold())) {
+                transitionToOpen();
+            }
             return;
         }
 
@@ -477,24 +521,12 @@ public final class CircuitBreaker {
         }
     }
 
-    private void evaluateClosedState() {
-        SlidingWindowMetrics metrics = slidingWindow.getMetrics();
-        if (metrics.totalCalls() < config.getMinimumCalls()) {
-            return;
-        }
-
-        boolean failureRateExceeded = metrics.failedCalls() > 0
-                && metrics.failureRate() >= config.getFailureRateThreshold();
-        boolean slowCallRateExceeded = metrics.slowCalls() > 0
-                && metrics.slowCallRate() >= config.getSlowCallRateThreshold();
-
-        if (failureRateExceeded || slowCallRateExceeded) {
-            transitionToOpen();
-        }
-    }
-
-    private Duration getCallDuration(Instant callStartedAt) {
-        Duration callDuration = Duration.between(callStartedAt, clock.instant());
+    private Duration getCallDuration(long startSecond, int startNano) {
+        Instant completedAt = clock.instant();
+        Duration callDuration = Duration.ofSeconds(
+                completedAt.getEpochSecond() - startSecond,
+                completedAt.getNano() - startNano
+        );
         return callDuration.isNegative() ? Duration.ZERO : callDuration;
     }
 
@@ -528,13 +560,16 @@ public final class CircuitBreaker {
         this.state = targetState;
         this.stateVersion++;
         this.openStateAt = targetState == CircuitBreakerState.OPEN ? clock.instant() : null;
-        halfOpenCallTracker.reset();
+        halfOpenCallTracker = new HalfOpenCallTracker();
         if (resetSlidingWindow) {
             slidingWindow.reset();
         }
+        // Publish only after the new state's bookkeeping is ready for callers.
+        admissionState = new CallPermission(stateVersion, targetState, halfOpenCallTracker);
     }
 
-    private record CallPermission(long stateVersion, CircuitBreakerState state) {
+    private record CallPermission(long stateVersion, CircuitBreakerState state,
+                                  HalfOpenCallTracker tracker) {
         private boolean ignoreResults() {
             return !state.recordsResults();
         }

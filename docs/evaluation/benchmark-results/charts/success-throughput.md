@@ -8,6 +8,6 @@ per second in this local JMH run.
 xychart-beta
     title "Successful calls through the breaker"
     x-axis ["Count custom", "Count Resilience4j", "Time custom", "Time Resilience4j"]
-    y-axis "M operations/s" 0 --> 16
-    bar [12.30, 15.06, 11.23, 13.15]
+    y-axis "M operations/s" 0 --> 21
+    bar [20.01, 9.84, 13.59, 9.20]
 ```

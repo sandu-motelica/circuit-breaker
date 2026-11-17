@@ -19,6 +19,13 @@ supplier, window size, threshold settings, and long OPEN duration. Failed calls
 use METRICS_ONLY to keep recording failures without a state change during the
 measurement; both implementations reuse one preconstructed exception. The
 four-thread method uses a single shared breaker per fork.
+
+`concurrentMixedTraffic` adds a four-thread workload with 75% immediate
+successes, 15% prebuilt failures, and 10% successful calls delayed with
+`parkNanos(2 ms)`. Both breakers run in METRICS_ONLY with a 1 ms slow-call
+threshold, so all planned outcomes continue to be recorded. This case includes
+the supplier delay and operating-system scheduling; it is not a measure of
+breaker overhead alone.
 The success breaker receives 1,024 setup calls before measurement, so the
 failure-rate read has enough history in either implementation.
 

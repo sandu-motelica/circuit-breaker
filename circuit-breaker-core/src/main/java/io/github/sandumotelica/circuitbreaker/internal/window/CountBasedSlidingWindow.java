@@ -9,7 +9,7 @@ public class CountBasedSlidingWindow implements SlidingWindow {
     private int failureCount;
     private int slowCallCount;
     private int totalCalls;
-
+    private volatile boolean healthyFull;
 
     public CountBasedSlidingWindow(int size) {
         if (size <= 0) throw new IllegalArgumentException("Window size must be greater than 0");
@@ -34,12 +34,28 @@ public class CountBasedSlidingWindow implements SlidingWindow {
     }
 
     @Override
+    public SlidingWindowMetrics recordAndGetMetricsLocked(boolean failure, boolean slow) {
+        assert Thread.holdsLock(this);
+        record(failure, slow);
+        return new SlidingWindowMetrics(totalCalls, failureCount, slowCallCount);
+    }
+
+    @Override
+    public boolean tryRecordHealthySuccess() {
+        // Replacing a success with a success cannot change a full healthy window.
+        // The volatile read is the linearization point relative to a failure,
+        // which clears the flag before changing the ring under its monitor.
+        return healthyFull;
+    }
+
+    @Override
     public synchronized SlidingWindowMetrics getMetrics() {
         return new SlidingWindowMetrics(totalCalls, failureCount, slowCallCount);
     }
 
     @Override
     public synchronized void reset() {
+        healthyFull = false;
         this.failureCount = 0;
         this.slowCallCount = 0;
         this.currentIndex = 0;
@@ -47,6 +63,7 @@ public class CountBasedSlidingWindow implements SlidingWindow {
     }
 
     private void record(boolean failure, boolean slowCall) {
+        healthyFull = false;
         if (totalCalls == size) {
             if (failureOutcomes[currentIndex]) {
                 failureCount--;
@@ -66,6 +83,10 @@ public class CountBasedSlidingWindow implements SlidingWindow {
         if (slowCall) {
             slowCallCount++;
         }
-        currentIndex = (currentIndex + 1) % size;
+        currentIndex++;
+        if (currentIndex == size) {
+            currentIndex = 0;
+        }
+        healthyFull = totalCalls == size && failureCount == 0 && slowCallCount == 0;
     }
 }
