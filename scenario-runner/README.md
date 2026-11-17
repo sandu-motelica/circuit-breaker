@@ -52,6 +52,10 @@ implementations expose different counter semantics.
 
 See [the comparison report](../docs/evaluation/resilience4j-comparison.md) for
 repeated measurements of all four supplied plans.
+The `scenarios/time-window-mixed.csv` plan is intended for a protected client
+started with `--demo.client.sliding-window-type=TIME_BASED` and its default
+four-second window. It waits for delayed calls to finish before the next load
+phase so slow-call transitions can be observed in both implementations.
 
 The CSV columns are:
 

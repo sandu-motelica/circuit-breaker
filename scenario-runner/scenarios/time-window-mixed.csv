@@ -1,0 +1,11 @@
+phase,count,intervalMs,modes,delaysMs,pauseBeforeMs
+# Let the healthy calls expire from the four-second time window.
+healthy,8,50,SUCCESS,20,0
+slow-wave,6,100,SUCCESS,1200,5000
+slow-open-load,40,20,SUCCESS,20,1500
+slow-recovery-probes,2,300,SUCCESS,20,6000
+# Start the failure wave after the recovery calls have expired.
+failure-wave,6,100,FAILURE,20,5000
+failure-open-load,40,20,FAILURE,20,500
+final-recovery-probes,2,300,SUCCESS,20,6000
+final-healthy,12,50,SUCCESS,20,100

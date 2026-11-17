@@ -1,5 +1,8 @@
 package io.github.sandumotelica.circuitbreaker.internal;
+import io.github.sandumotelica.circuitbreaker.ConcurrentTestSupport;
 import org.junit.jupiter.api.Test;
+
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -45,5 +48,21 @@ class HalfOpenCallTrackerTest {
         tracker.recordIgnoredCall();
 
         assertEquals(HalfOpenCallTracker.AdmissionResult.ACCEPTED, tracker.tryAcquire(1, 1));
+    }
+
+    @Test
+    void concurrentAdmissionsNeverExceedEitherLimit() throws Exception {
+        HalfOpenCallTracker tracker = new HalfOpenCallTracker();
+        AtomicInteger admitted = new AtomicInteger();
+
+        ConcurrentTestSupport.runConcurrently(500, () -> {
+            if (tracker.tryAcquire(50, 20) == HalfOpenCallTracker.AdmissionResult.ACCEPTED) {
+                admitted.incrementAndGet();
+            }
+        });
+
+        assertEquals(20, admitted.get());
+        assertEquals(HalfOpenCallTracker.AdmissionResult.CONCURRENT_LIMIT_REACHED,
+                tracker.tryAcquire(50, 20));
     }
 }

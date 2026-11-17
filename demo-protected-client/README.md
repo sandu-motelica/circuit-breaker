@@ -68,3 +68,6 @@ endpoint.
 The upstream URL, circuit-breaker thresholds, and HTTP timeouts are configured
 in `src/main/resources/application.yml`. For example, set the environment
 variable `DEMO_CLIENT_UPSTREAM_BASE_URL` to use a different upstream address.
+Both routes use a count window by default. To compare their four-second time
+windows, start the protected client with
+`--demo.client.sliding-window-type=TIME_BASED` after the JAR path.

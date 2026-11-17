@@ -58,4 +58,33 @@ public class TimeBasedCircuitBreakerTest {
 
         assertEquals(CircuitBreakerState.OPEN, cb.getState());
     }
+
+    @Test
+    void preserveNanosecondDurationAcrossSecondBoundary() {
+        MutableClock preciseClock = new MutableClock(Instant.parse("2026-01-01T00:00:00.999999900Z"));
+        CircuitBreaker preciseBreaker = new CircuitBreaker(config.toBuilder()
+                .minimumCalls(1)
+                .slowCallDurationThreshold(Duration.ofNanos(300))
+                .slowCallRateThreshold(1.0f)
+                .build(), preciseClock);
+
+        preciseBreaker.execute(() -> {
+            preciseClock.advance(Duration.ofNanos(300));
+            return "OK";
+        });
+
+        assertEquals(Duration.ofNanos(300), preciseBreaker.getStatistics().averageDuration());
+        assertEquals(CircuitBreakerState.OPEN, preciseBreaker.getState());
+    }
+
+    @Test
+    void clampDurationWhenClockMovesBackwards() {
+        cb.execute(() -> {
+            clock.advance(Duration.ofNanos(-1));
+            return "OK";
+        });
+
+        assertEquals(Duration.ZERO, cb.getStatistics().averageDuration());
+        assertEquals(CircuitBreakerState.CLOSED, cb.getState());
+    }
 }

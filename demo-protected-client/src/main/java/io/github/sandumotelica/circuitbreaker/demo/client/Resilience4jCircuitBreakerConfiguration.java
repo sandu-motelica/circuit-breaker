@@ -2,6 +2,7 @@ package io.github.sandumotelica.circuitbreaker.demo.client;
 
 import io.github.resilience4j.circuitbreaker.CircuitBreaker;
 import io.github.resilience4j.circuitbreaker.CircuitBreakerConfig;
+import io.github.sandumotelica.circuitbreaker.SlidingWindowType;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
@@ -10,7 +11,9 @@ class Resilience4jCircuitBreakerConfiguration {
     @Bean
     CircuitBreaker resilience4jPaymentCircuitBreaker(ProtectedClientProperties properties) {
         CircuitBreakerConfig config = CircuitBreakerConfig.custom()
-                .slidingWindowType(CircuitBreakerConfig.SlidingWindowType.COUNT_BASED)
+                .slidingWindowType(properties.slidingWindowType() == SlidingWindowType.TIME_BASED
+                        ? CircuitBreakerConfig.SlidingWindowType.TIME_BASED
+                        : CircuitBreakerConfig.SlidingWindowType.COUNT_BASED)
                 .slidingWindowSize(properties.slidingWindowSize())
                 .minimumNumberOfCalls(properties.minimumCalls())
                 .failureRateThreshold(properties.failureRateThreshold() * 100)
