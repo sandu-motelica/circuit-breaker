@@ -28,9 +28,10 @@ public final class ScenarioRunner {
     }
 
     public static void main(String[] args) throws Exception {
-        if (args.length < 2 || args.length > 5) {
+        if (args.length < 2 || args.length > 6) {
             throw new IllegalArgumentException("Usage: java -jar scenario-runner-all.jar "
-                    + "<scenario.csv> <output-dir> [threads] [client-url] [upstream-url]");
+                    + "<scenario.csv> <output-dir> [threads] [client-url] [upstream-url] "
+                    + "[custom|resilience4j|both]");
         }
         int threads = args.length > 2 ? Integer.parseInt(args[2]) : 1;
         if (threads <= 0) {
@@ -39,7 +40,25 @@ public final class ScenarioRunner {
         URI client = URI.create(args.length > 3 ? args[3] : "http://localhost:8080");
         URI upstream = URI.create(args.length > 4 ? args[4] : "http://localhost:8081");
         ScenarioPlan plan = ScenarioPlan.load(Path.of(args[0]));
-        RunSummary summary = new ScenarioRunner().run(plan, Path.of(args[1]), threads, client, upstream);
+        Path outputDir = Path.of(args[1]);
+        String selection = args.length > 5 ? args[5].toLowerCase(java.util.Locale.ROOT) : "custom";
+        ScenarioRunner runner = new ScenarioRunner();
+        if ("both".equals(selection)) {
+            RunSummary custom = runner.run(plan, outputDir.resolve(Target.CUSTOM.id()),
+                    threads, client, upstream, Target.CUSTOM);
+            RunSummary resilience4j = runner.run(plan, outputDir.resolve(Target.RESILIENCE4J.id()),
+                    threads, client, upstream, Target.RESILIENCE4J);
+            runner.json.writerWithDefaultPrettyPrinter().writeValue(
+                    outputDir.resolve("comparison.json").toFile(), ComparisonSummary.from(custom, resilience4j));
+            System.out.printf("Completed both runs. Results: %s%n", outputDir.toAbsolutePath());
+            return;
+        }
+        Target target = switch (selection) {
+            case "custom" -> Target.CUSTOM;
+            case "resilience4j" -> Target.RESILIENCE4J;
+            default -> throw new IllegalArgumentException("Unknown target: " + selection);
+        };
+        RunSummary summary = runner.run(plan, outputDir, threads, client, upstream, target);
         System.out.printf("Completed %d requests: %d successful, %d upstream failures, "
                         + "%d rejected. Upstream received %d. Results: %s%n",
                 summary.plannedRequests(), summary.successful(), summary.upstreamFailures(),
@@ -48,10 +67,15 @@ public final class ScenarioRunner {
 
     RunSummary run(ScenarioPlan plan, Path outputDir, int threads, URI client, URI upstream)
             throws Exception {
+        return run(plan, outputDir, threads, client, upstream, Target.CUSTOM);
+    }
+
+    RunSummary run(ScenarioPlan plan, Path outputDir, int threads, URI client, URI upstream,
+                   Target target) throws Exception {
         String clientBase = baseUrl(client);
         String upstreamBase = baseUrl(upstream);
         requireNoContent(upstreamBase + "/api/simulation/reset");
-        requireNoContent(clientBase + "/api/circuit-breaker/reset");
+        requireNoContent(clientBase + target.breakerPath() + "/reset");
 
         long startedAt = System.nanoTime();
         List<CallResult> results = new ArrayList<>(plan.calls().size());
@@ -59,7 +83,8 @@ public final class ScenarioRunner {
             List<ScheduledFuture<CallResult>> futures = new ArrayList<>(plan.calls().size());
             for (ScenarioPlan.PlannedCall call : plan.calls()) {
                 futures.add(scheduler.schedule(
-                        () -> execute(call, clientBase, startedAt), call.scheduledMs(), TimeUnit.MILLISECONDS));
+                        () -> execute(call, clientBase, target, startedAt),
+                        call.scheduledMs(), TimeUnit.MILLISECONDS));
             }
             for (ScheduledFuture<CallResult> future : futures) {
                 results.add(future.get());
@@ -67,8 +92,8 @@ public final class ScenarioRunner {
         }
 
         JsonNode upstreamStats = getJson(upstreamBase + "/api/simulation/stats");
-        JsonNode breakerStats = getJson(clientBase + "/api/circuit-breaker");
-        RunSummary summary = RunSummary.from(plan.name(), threads, clientBase, upstreamBase,
+        JsonNode breakerStats = getJson(clientBase + target.breakerPath());
+        RunSummary summary = RunSummary.from(plan.name(), target.id(), threads, clientBase, upstreamBase,
                 results, upstreamStats.required("receivedRequests").longValue(), breakerStats);
         Files.createDirectories(outputDir);
         writeCalls(outputDir.resolve("calls.csv"), results);
@@ -76,10 +101,11 @@ public final class ScenarioRunner {
         return summary;
     }
 
-    private CallResult execute(ScenarioPlan.PlannedCall call, String clientBase, long startedAt) {
+    private CallResult execute(ScenarioPlan.PlannedCall call, String clientBase,
+                               Target target, long startedAt) {
         long actualStart = System.nanoTime();
         long startMs = Duration.ofNanos(actualStart - startedAt).toMillis();
-        String url = clientBase + "/api/payments/scenario-" + call.sequence()
+        String url = clientBase + target.paymentPath() + "scenario-" + call.sequence()
                 + "?mode=" + call.mode() + "&delayMs=" + call.delayMs();
         int status = 0;
         String result;

@@ -1,5 +1,6 @@
 target/
 scenario-runner/results/
+/scenario-runner/analyze_repetitions.py
 !.mvn/wrapper/maven-wrapper.jar
 !**/src/main/**/target/
 !**/src/test/**/target/

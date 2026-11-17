@@ -60,8 +60,8 @@ curl -X POST "http://localhost:8080/api/resilience4j/circuit-breaker/reset"
 Each reset returns HTTP 204 and affects only its own circuit. The Resilience4j
 status reports native library metrics: rates are percentages (`-1` before enough
 calls), `bufferedCalls` and `failedCalls` describe the current sliding window,
-and `notPermittedCalls` counts rejections since reset. The custom status uses
-fractional rates and cumulative call counts.
+and `notPermittedCalls` counts denials only in the current OPEN state. The custom
+status uses fractional rates and cumulative call counts.
 Reset the upstream service separately through its `/api/simulation/reset`
 endpoint.
 
