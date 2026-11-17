@@ -14,12 +14,14 @@
         <module>demo-unstable-service</module>
         <module>demo-protected-client</module>
         <module>scenario-runner</module>
+        <module>circuit-breaker-benchmarks</module>
     </modules>
 
     <properties>
         <maven.compiler.source>21</maven.compiler.source>
         <maven.compiler.target>21</maven.compiler.target>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <resilience4j.version>2.4.0</resilience4j.version>
     </properties>
 
 </project>
