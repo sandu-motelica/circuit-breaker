@@ -26,13 +26,32 @@ java -jar scenario-runner/target/scenario-runner-0.1.0-SNAPSHOT-all.jar \
 
 On Windows, use `.\mvnw.cmd` for Maven. The runner accepts optional arguments
 after the output directory: `threads`, `client-url`, and `upstream-url`. Defaults
-are `1`, `http://localhost:8080`, and `http://localhost:8081`. Example:
+are `1`, `http://localhost:8080`, and `http://localhost:8081`. A final optional
+argument selects `custom` (default), `resilience4j`, or `both`. Example:
 
 ```sh
 java -jar scenario-runner/target/scenario-runner-0.1.0-SNAPSHOT-all.jar \
   scenario-runner/scenarios/healthy.csv scenario-runner/results/healthy \
   4 http://localhost:8080 http://localhost:8081
 ```
+
+Run the same plan through both implementations:
+
+```sh
+java -jar scenario-runner/target/scenario-runner-0.1.0-SNAPSHOT-all.jar \
+  scenario-runner/scenarios/outage-recovery.csv scenario-runner/results/compare \
+  1 http://localhost:8080 http://localhost:8081 both
+```
+
+This writes `custom/` and `resilience4j/` subdirectories with `calls.csv` and
+`summary.json`, plus `comparison.json` with per-phase and overall counts and
+deltas (`resilience4j - custom`). Each run resets the upstream counter and its
+own circuit. The comparison uses observed HTTP outcomes and upstream request
+counts; the breaker status payload is preserved in each summary because the
+implementations expose different counter semantics.
+
+See [the comparison report](../docs/evaluation/resilience4j-comparison.md) for
+repeated measurements of all four supplied plans.
 
 The CSV columns are:
 

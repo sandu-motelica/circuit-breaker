@@ -14,6 +14,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -93,6 +94,76 @@ class ScenarioRunnerTest {
         Files.writeString(scenario, "phase,count,intervalMs,modes,delaysMs,pauseBeforeMs\n"
                 + "unstable,2,10,RANDOM,20,0\n");
         assertThrows(IllegalArgumentException.class, () -> ScenarioPlan.load(scenario));
+    }
+
+    @Test
+    void runsIdenticalPlanThroughBothRoutesAndComparesOutcomes() throws Exception {
+        Path scenario = temporaryDirectory.resolve("both.csv");
+        Files.writeString(scenario, "phase,count,intervalMs,modes,delaysMs,pauseBeforeMs\n"
+                + "healthy,2,20,SUCCESS,0,0\n");
+        AtomicInteger upstreamCalls = new AtomicInteger();
+        AtomicInteger customCalls = new AtomicInteger();
+        AtomicInteger resilience4jCalls = new AtomicInteger();
+        AtomicInteger customResets = new AtomicInteger();
+        AtomicInteger resilience4jResets = new AtomicInteger();
+        HttpServer upstream = server();
+        HttpServer client = server();
+        upstream.createContext("/api/simulation/reset", exchange -> {
+            upstreamCalls.set(0);
+            respond(exchange, 204, "");
+        });
+        upstream.createContext("/api/simulation/stats", exchange -> respond(exchange, 200,
+                "{\"receivedRequests\":" + upstreamCalls.get() + "}"));
+        client.createContext("/api/circuit-breaker/reset", exchange -> {
+            customResets.incrementAndGet();
+            respond(exchange, 204, "");
+        });
+        client.createContext("/api/circuit-breaker", exchange -> respond(exchange, 200,
+                "{\"state\":\"CLOSED\",\"totalCalls\":2}"));
+        client.createContext("/api/resilience4j/circuit-breaker/reset", exchange -> {
+            resilience4jResets.incrementAndGet();
+            respond(exchange, 204, "");
+        });
+        client.createContext("/api/resilience4j/circuit-breaker", exchange -> respond(exchange, 200,
+                "{\"state\":\"CLOSED\",\"bufferedCalls\":2}"));
+        client.createContext("/api/payments/resilience4j/", exchange -> {
+            resilience4jCalls.incrementAndGet();
+            upstreamCalls.incrementAndGet();
+            respond(exchange, 200, "{\"status\":\"APPROVED\"}");
+        });
+        client.createContext("/api/payments/", exchange -> {
+            customCalls.incrementAndGet();
+            upstreamCalls.incrementAndGet();
+            respond(exchange, 200, "{\"status\":\"APPROVED\"}");
+        });
+        upstream.start();
+        client.start();
+        try {
+            ScenarioRunner runner = new ScenarioRunner();
+            ScenarioPlan plan = ScenarioPlan.load(scenario);
+            RunSummary custom = runner.run(plan, temporaryDirectory.resolve("custom"),
+                    1, address(client), address(upstream), Target.CUSTOM);
+            RunSummary resilience4j = runner.run(plan, temporaryDirectory.resolve("resilience4j"),
+                    1, address(client), address(upstream), Target.RESILIENCE4J);
+            ComparisonSummary comparison = ComparisonSummary.from(custom, resilience4j);
+
+            assertEquals(2, customCalls.get());
+            assertEquals(2, resilience4jCalls.get());
+            assertEquals(1, customResets.get());
+            assertEquals(1, resilience4jResets.get());
+            assertEquals(2, custom.upstreamRequests());
+            assertEquals(2, resilience4j.upstreamRequests());
+            assertEquals(0, comparison.overall().successful().delta());
+            assertEquals(0, comparison.overall().upstreamRequests().delta());
+            assertEquals("CLOSED", comparison.resilience4jFinalState());
+            String comparisonJson = new tools.jackson.databind.ObjectMapper().writeValueAsString(comparison);
+            assertTrue(comparisonJson.contains("\"phase\":\"healthy\""));
+            assertFalse(comparisonJson.contains("\"upstreamRequests\":null"));
+            assertTrue(Files.exists(temporaryDirectory.resolve("resilience4j/summary.json")));
+        } finally {
+            client.stop(0);
+            upstream.stop(0);
+        }
     }
 
     private static HttpServer server() throws IOException {

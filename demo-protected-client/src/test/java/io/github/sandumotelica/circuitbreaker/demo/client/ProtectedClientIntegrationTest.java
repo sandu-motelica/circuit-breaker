@@ -38,9 +38,13 @@ class ProtectedClientIntegrationTest {
     @Autowired
     private CircuitBreaker circuitBreaker;
 
+    @Autowired
+    private io.github.resilience4j.circuitbreaker.CircuitBreaker resilience4jCircuitBreaker;
+
     @BeforeEach
     void resetState() {
         circuitBreaker.reset();
+        resilience4jCircuitBreaker.reset();
         upstreamCalls.set(0);
     }
 
@@ -117,6 +121,63 @@ class ProtectedClientIntegrationTest {
         assertEquals(1, upstreamCalls.get());
         mockMvc.perform(get("/api/circuit-breaker"))
                 .andExpect(jsonPath("$.totalCalls").value(1));
+    }
+
+    @Test
+    void resilience4jRouteOpensIndependentlyAndCanBeReset() throws Exception {
+        String route = "/api/payments/resilience4j/payment-123";
+        mockMvc.perform(get(route).param("mode", "SUCCESS").param("delayMs", "0"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.paymentId").value("payment-123"));
+        assertTrue(lastUpstreamQuery.get().contains("mode=SUCCESS"));
+        assertTrue(lastUpstreamQuery.get().contains("delayMs=0"));
+
+        for (int i = 0; i < 2; i++) {
+            mockMvc.perform(get(route).param("mode", "FAILURE"))
+                    .andExpect(status().isBadGateway())
+                    .andExpect(jsonPath("$.code").value("UPSTREAM_FAILURE"));
+        }
+        mockMvc.perform(get(route).param("mode", "SUCCESS"))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(get("/api/resilience4j/circuit-breaker"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.state").value("OPEN"))
+                .andExpect(jsonPath("$.failureRate").value(50.0))
+                .andExpect(jsonPath("$.bufferedCalls").value(4))
+                .andExpect(jsonPath("$.failedCalls").value(2));
+
+        mockMvc.perform(get(route).param("mode", "SUCCESS"))
+                .andExpect(status().isServiceUnavailable())
+                .andExpect(jsonPath("$.code").value("CIRCUIT_OPEN"));
+        assertEquals(4, upstreamCalls.get());
+
+        mockMvc.perform(get("/api/circuit-breaker"))
+                .andExpect(jsonPath("$.state").value("CLOSED"))
+                .andExpect(jsonPath("$.totalCalls").value(0));
+        mockMvc.perform(get("/api/payments/payment-123").param("mode", "SUCCESS"))
+                .andExpect(status().isOk());
+        assertEquals(5, upstreamCalls.get());
+
+        mockMvc.perform(post("/api/resilience4j/circuit-breaker/reset"))
+                .andExpect(status().isNoContent());
+        mockMvc.perform(get("/api/resilience4j/circuit-breaker"))
+                .andExpect(jsonPath("$.state").value("CLOSED"))
+                .andExpect(jsonPath("$.bufferedCalls").value(0));
+        mockMvc.perform(get(route).param("mode", "SUCCESS"))
+                .andExpect(status().isOk());
+        assertEquals(6, upstreamCalls.get());
+    }
+
+    @Test
+    void resilience4jRouteRejectsInvalidDelayBeforeCallingUpstream() throws Exception {
+        mockMvc.perform(get("/api/payments/resilience4j/payment-123")
+                        .param("mode", "SUCCESS")
+                        .param("delayMs", "-1"))
+                .andExpect(status().isBadRequest());
+        assertEquals(0, upstreamCalls.get());
+        mockMvc.perform(get("/api/resilience4j/circuit-breaker"))
+                .andExpect(jsonPath("$.bufferedCalls").value(0));
     }
 
     private static HttpServer startUpstream() {

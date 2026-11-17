@@ -7,14 +7,13 @@ import java.util.stream.Collectors;
 
 import tools.jackson.databind.JsonNode;
 
-record RunSummary(String scenario, int threads, String clientUrl, String upstreamUrl,
+record RunSummary(String scenario, String implementation, int threads, String clientUrl, String upstreamUrl,
                   int plannedRequests, long successful, long upstreamFailures, long rejected,
                   long unexpectedResponses, long transportErrors, long upstreamRequests,
-                  String finalState, long breakerTotalCalls, long breakerFailedCalls,
-                  long breakerRejectedCalls, double averageLatencyMs,
+                  String finalState, JsonNode breakerMetrics, double averageLatencyMs,
                   long p50LatencyMs, long p95LatencyMs, long p99LatencyMs,
                   List<PhaseSummary> phases) {
-    static RunSummary from(String scenario, int threads, String clientUrl, String upstreamUrl,
+    static RunSummary from(String scenario, String implementation, int threads, String clientUrl, String upstreamUrl,
                            List<ScenarioRunner.CallResult> calls, long upstreamRequests, JsonNode breaker) {
         List<Long> durations = calls.stream().map(ScenarioRunner.CallResult::durationMs).sorted().toList();
         Map<String, List<ScenarioRunner.CallResult>> byPhase = calls.stream().collect(
@@ -22,14 +21,11 @@ record RunSummary(String scenario, int threads, String clientUrl, String upstrea
                         Collectors.toList()));
         List<PhaseSummary> phases = byPhase.entrySet().stream()
                 .map(entry -> PhaseSummary.from(entry.getKey(), entry.getValue())).toList();
-        return new RunSummary(scenario, threads, clientUrl, upstreamUrl,
+        return new RunSummary(scenario, implementation, threads, clientUrl, upstreamUrl,
                 calls.size(), count(calls, "SUCCESS"),
                 count(calls, "UPSTREAM_FAILURE"), count(calls, "REJECTED"),
                 count(calls, "UNEXPECTED_RESPONSE"), count(calls, "TRANSPORT_ERROR"),
-                upstreamRequests, breaker.required("state").asText(),
-                breaker.required("totalCalls").longValue(),
-                breaker.required("failedCalls").longValue(),
-                breaker.required("rejectedCalls").longValue(),
+                upstreamRequests, breaker.required("state").asText(), breaker,
                 calls.stream().mapToLong(ScenarioRunner.CallResult::durationMs).average().orElse(0),
                 percentile(durations, 0.50), percentile(durations, 0.95), percentile(durations, 0.99),
                 phases);

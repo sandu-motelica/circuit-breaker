@@ -15,6 +15,11 @@ class ApiExceptionHandler {
                 .body(new ApiError("CIRCUIT_OPEN", "The payment service is temporarily unavailable"));
     }
 
+    @ExceptionHandler(io.github.resilience4j.circuitbreaker.CallNotPermittedException.class)
+    ResponseEntity<ApiError> resilience4jCircuitOpen() {
+        return circuitOpen();
+    }
+
     @ExceptionHandler(RestClientException.class)
     ResponseEntity<ApiError> upstreamFailure() {
         return ResponseEntity.status(HttpStatus.BAD_GATEWAY)
