@@ -24,7 +24,7 @@ The command used from the repository root was:
 ```sh
 java -jar circuit-breaker-benchmarks/target/circuit-breaker-benchmarks-0.1.0-SNAPSHOT-all.jar \
   -wi 2 -i 3 -w 1s -r 1s -f 1 -prof gc \
-  -rf json -rff benchmark-results/results.json
+  -rf json -rff docs/evaluation/benchmark-results/results.json
 ```
 
 This is a local exploratory run. One fork and short iterations limit how much

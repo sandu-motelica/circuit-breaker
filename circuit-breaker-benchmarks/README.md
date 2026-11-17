@@ -8,7 +8,7 @@ repository root:
 ./mvnw -pl circuit-breaker-benchmarks -am verify
 java -jar circuit-breaker-benchmarks/target/circuit-breaker-benchmarks-0.1.0-SNAPSHOT-all.jar \
   -wi 2 -i 3 -w 1s -r 1s -f 1 -prof gc \
-  -rf json -rff benchmark-results/results.json
+  -rf json -rff docs/evaluation/benchmark-results/results.json
 ```
 
 The suite covers a direct supplier call, successful calls with count-based and
@@ -29,7 +29,7 @@ multiply by 1,000,000,000 for operations per second. Run the JAR rather than a
 JUnit test or an IDE run configuration, as recommended by the
 [JMH project](https://github.com/openjdk/jmh#usage).
 
-The measured [environment and results](../benchmark-results/environment.md) are
+The measured [environment and results](../docs/evaluation/benchmark-results/environment.md) are
 recorded separately. The `results.json` and `results.csv` files are generated
 outputs. CI compiles the module through the root Maven build but does not run
 the JMH suite. Listener dispatch and asynchronous execution are outside this

@@ -10,7 +10,7 @@ and time windows, so those cases include the corresponding window update.
 There is no HTTP in the measured path.
 
 The environment, JMH options, and raw files are in
-[`benchmark-results`](../../benchmark-results/environment.md). JMH ran two
+[`benchmark-results`](benchmark-results/environment.md). JMH ran two
 one-second warmup iterations and three one-second measurement iterations in
 one fork. The values below are exploratory measurements from that single local
 run, not performance thresholds for CI.
@@ -42,7 +42,7 @@ count window; the custom path was higher with a time window. OPEN rejection
 throughput was close with a count window and varied by window type. Allocation
 differences were clearest on rejections, where both implementations create an
 exception: about 752 B/op for custom and 1,264 B/op for Resilience4j.
-The [successful-call chart](../../benchmark-results/charts/success-throughput.md)
+The [successful-call chart](benchmark-results/charts/success-throughput.md)
 shows the two window variants at a glance.
 
 ## Sampled latency
